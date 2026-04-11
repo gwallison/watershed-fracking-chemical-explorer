@@ -1,0 +1,22 @@
+# Streamlit secrets
+.streamlit/secrets.toml
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Environment / temp
+.env
+tmp/
+*.parquet
+
+# Claude Code session data
+.claude/
+
+# Stale root-level module copies (vendored into openff_utils/)
+/chem_list_summary.py
+/generate_PDF_report_v1.py
+/handles.py
+/mapping.py
+/text_handlers.py
