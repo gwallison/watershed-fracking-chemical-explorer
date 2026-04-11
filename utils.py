@@ -20,7 +20,6 @@ from concurrent.futures import ThreadPoolExecutor
 
 import geopandas as gpd
 import pandas as pd
-import requests
 import streamlit as st
 from shapely.geometry import Point
 
@@ -31,6 +30,8 @@ from shapely.geometry import Point
 BASE_URL = "https://storage.googleapis.com/open-ff-query-layer/v1"
 N_PARTITIONS = 256
 HUC_LAYER = {2: 1, 4: 2, 6: 3, 8: 4, 10: 5, 12: 6}
+
+WBD_GPKG_URL = "https://storage.googleapis.com/open-ff-common/ext_data/WBD_National_GPKG.gpkg"
 
 # Columns to keep from disclosure partition files (tier 2)
 _DISC_COLS = [
@@ -125,36 +126,14 @@ def load_watershed_chemrecs(disc_id_list: list) -> pd.DataFrame:
 # Watershed fetch (USGS WBD ArcGIS REST)
 # ---------------------------------------------------------------------------
 
-@st.cache_data(show_spinner="Fetching watershed boundary from USGS...")
+@st.cache_data(show_spinner="Fetching watershed boundary...")
 def fetch_watershed(latitude: float, longitude: float, huc_scale: int) -> gpd.GeoDataFrame:
-    layer_id = HUC_LAYER[huc_scale]
     buffer = 0.1
-    bbox = f"{longitude-buffer},{latitude-buffer},{longitude+buffer},{latitude+buffer}"
-    params = {
-        "geometry": bbox,
-        "geometryType": "esriGeometryEnvelope",
-        "inSR": "4326",
-        "spatialRel": "esriSpatialRelIntersects",
-        "outFields": f"name,huc{huc_scale}",
-        "returnGeometry": "true",
-        "f": "geojson",
-    }
-    url = (
-        f"https://hydro.nationalmap.gov/arcgis/rest/services/wbd/MapServer"
-        f"/{layer_id}/query"
-    )
-    headers = {"User-Agent": "watershed-fracking-chemical-explorer/1.0"}
-    r = requests.get(url, params=params, headers=headers, timeout=30)
-    if not r.ok:
-        raise RuntimeError(
-            f"USGS WBD API returned HTTP {r.status_code} for layer {layer_id}. "
-            f"Response: {r.text[:300]}"
-        )
-    data = r.json()
-    if "error" in data:
-        raise RuntimeError(f"USGS WBD API error: {data['error']}")
-    gdf = gpd.GeoDataFrame.from_features(data["features"], crs=4326)
-    return gdf
+    bbox = (longitude - buffer, latitude - buffer,
+            longitude + buffer, latitude + buffer)
+    layer = f"WBDHU{huc_scale}"
+    gdf = gpd.read_file(WBD_GPKG_URL, layer=layer, bbox=bbox)
+    return gdf.to_crs(4326)
 
 
 # ---------------------------------------------------------------------------
