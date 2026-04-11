@@ -29,11 +29,11 @@ from shapely.geometry import Point
 # Constants
 # ---------------------------------------------------------------------------
 
-BASE_URL = "https://storage.googleapis.com/open-ff-query-layer/v1"
+BASE_URL = "https://storage.googleapis.com/open-ff-query-layer/pa/v1"
 N_PARTITIONS = 256
 HUC_LAYER = {2: 1, 4: 2, 6: 3, 8: 4, 10: 5, 12: 6}
 
-WBD_BASE_URL = f"{BASE_URL}/wbd"
+WBD_BASE_URL = "https://storage.googleapis.com/open-ff-query-layer/v1/wbd"
 
 # Columns to keep from disclosure partition files (tier 2)
 _DISC_COLS = [
