@@ -109,15 +109,15 @@ def load_watershed_chemrecs(disc_id_list: list) -> pd.DataFrame:
     Load chemical records for a list of DisclosureIds.
     Only the partition files that contain those IDs are fetched;
     already-cached partitions are returned instantly.
+    Partitions are fetched in parallel for speed on large watersheds.
     """
     buckets = sorted({key_to_bucket(d) for d in disc_id_list})
     disc_set = set(disc_id_list)
-    parts = []
-    for b in buckets:
-        df = _load_chemrec_partition(b)
-        parts.append(df[df["DisclosureId"].isin(disc_set)])
-    if not parts:
+    if not buckets:
         return pd.DataFrame()
+    with ThreadPoolExecutor(max_workers=20) as ex:
+        fetched = list(ex.map(_load_chemrec_partition, buckets))
+    parts = [df[df["DisclosureId"].isin(disc_set)] for df in fetched]
     result = pd.concat(parts, ignore_index=True)
     if "in_std_filtered" in result.columns:
         result = result[result["in_std_filtered"]].copy()
