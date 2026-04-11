@@ -131,9 +131,18 @@ def load_watershed_chemrecs(disc_id_list: list) -> pd.DataFrame:
 @st.cache_data(show_spinner="Loading watershed boundaries...")
 def _load_wbd_layer(huc_scale: int) -> gpd.GeoDataFrame:
     """Load the full WBD GeoParquet for one HUC scale. Cached per scale."""
+    import pyarrow.parquet as pq
     url = f"{WBD_BASE_URL}/huc{huc_scale}.parquet"
-    buf = io.BytesIO(requests.get(url, timeout=60).content)
-    return gpd.read_parquet(buf)
+    try:
+        r = requests.get(url, timeout=120)
+        r.raise_for_status()
+        buf = io.BytesIO(r.content)
+        table = pq.read_table(buf)
+        return gpd.GeoDataFrame.from_arrow(table).set_crs(4326)
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to load WBD HUC{huc_scale} from {url}: {type(e).__name__}: {e}"
+        ) from e
 
 
 def fetch_watershed(latitude: float, longitude: float, huc_scale: int) -> gpd.GeoDataFrame:
