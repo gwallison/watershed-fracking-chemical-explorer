@@ -138,7 +138,12 @@ def _load_wbd_layer(huc_scale: int) -> gpd.GeoDataFrame:
         r.raise_for_status()
         buf = io.BytesIO(r.content)
         table = pq.read_table(buf)
-        return gpd.GeoDataFrame.from_arrow(table).set_crs(4326)
+        gdf = gpd.GeoDataFrame.from_arrow(table)
+        if gdf.crs is None:
+            gdf = gdf.set_crs(4326)
+        elif gdf.crs.to_epsg() != 4326:
+            gdf = gdf.to_crs(4326)
+        return gdf
     except Exception as e:
         raise RuntimeError(
             f"Failed to load WBD HUC{huc_scale} from {url}: {type(e).__name__}: {e}"
