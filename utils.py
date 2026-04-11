@@ -96,9 +96,9 @@ def load_well_index() -> pd.DataFrame:
 # Phase 2 — chemical records for a set of disclosures (per-partition cached)
 # ---------------------------------------------------------------------------
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=64)
 def _load_chemrec_partition(bucket_id: int) -> pd.DataFrame:
-    """Fetch one tier-4 chemrec partition. Cached per bucket_id."""
+    """Fetch one tier-4 chemrec partition. Cached per bucket_id (LRU, max 64)."""
     url = f"{BASE_URL}/chemrecs/part_{bucket_id:03d}.parquet"
     df = pd.read_parquet(url)
     return df[[c for c in _CHEM_COLS if c in df.columns]]
@@ -115,7 +115,7 @@ def load_watershed_chemrecs(disc_id_list: list) -> pd.DataFrame:
     disc_set = set(disc_id_list)
     if not buckets:
         return pd.DataFrame()
-    with ThreadPoolExecutor(max_workers=20) as ex:
+    with ThreadPoolExecutor(max_workers=8) as ex:
         fetched = list(ex.map(_load_chemrec_partition, buckets))
     parts = [df[df["DisclosureId"].isin(disc_set)] for df in fetched]
     result = pd.concat(parts, ignore_index=True)
