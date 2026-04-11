@@ -143,8 +143,13 @@ def fetch_watershed(latitude: float, longitude: float, huc_scale: int) -> gpd.Ge
         f"https://hydro.nationalmap.gov/arcgis/rest/services/wbd/MapServer"
         f"/{layer_id}/query"
     )
-    r = requests.get(url, params=params, timeout=30)
-    r.raise_for_status()
+    headers = {"User-Agent": "watershed-fracking-chemical-explorer/1.0"}
+    r = requests.get(url, params=params, headers=headers, timeout=30)
+    if not r.ok:
+        raise RuntimeError(
+            f"USGS WBD API returned HTTP {r.status_code} for layer {layer_id}. "
+            f"Response: {r.text[:300]}"
+        )
     data = r.json()
     if "error" in data:
         raise RuntimeError(f"USGS WBD API error: {data['error']}")
