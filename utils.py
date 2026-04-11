@@ -19,7 +19,9 @@ import io
 from concurrent.futures import ThreadPoolExecutor
 
 import geopandas as gpd
+import io
 import pandas as pd
+import requests
 import streamlit as st
 from shapely.geometry import Point
 
@@ -31,7 +33,7 @@ BASE_URL = "https://storage.googleapis.com/open-ff-query-layer/v1"
 N_PARTITIONS = 256
 HUC_LAYER = {2: 1, 4: 2, 6: 3, 8: 4, 10: 5, 12: 6}
 
-WBD_GPKG_URL = "https://storage.googleapis.com/open-ff-common/ext_data/WBD_National_GPKG.gpkg"
+WBD_BASE_URL = f"{BASE_URL}/wbd"
 
 # Columns to keep from disclosure partition files (tier 2)
 _DISC_COLS = [
@@ -126,14 +128,20 @@ def load_watershed_chemrecs(disc_id_list: list) -> pd.DataFrame:
 # Watershed fetch (USGS WBD ArcGIS REST)
 # ---------------------------------------------------------------------------
 
-@st.cache_data(show_spinner="Fetching watershed boundary...")
+@st.cache_data(show_spinner="Loading watershed boundaries...")
+def _load_wbd_layer(huc_scale: int) -> gpd.GeoDataFrame:
+    """Load the full WBD GeoParquet for one HUC scale. Cached per scale."""
+    url = f"{WBD_BASE_URL}/huc{huc_scale}.parquet"
+    buf = io.BytesIO(requests.get(url, timeout=60).content)
+    return gpd.read_parquet(buf)
+
+
 def fetch_watershed(latitude: float, longitude: float, huc_scale: int) -> gpd.GeoDataFrame:
     buffer = 0.1
+    gdf = _load_wbd_layer(huc_scale)
     bbox = (longitude - buffer, latitude - buffer,
             longitude + buffer, latitude + buffer)
-    layer = f"WBDHU{huc_scale}"
-    gdf = gpd.read_file(WBD_GPKG_URL, layer=layer, bbox=bbox)
-    return gdf.to_crs(4326)
+    return gdf.cx[bbox[0]:bbox[2], bbox[1]:bbox[3]]
 
 
 # ---------------------------------------------------------------------------
