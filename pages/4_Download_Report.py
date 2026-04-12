@@ -12,7 +12,7 @@ import io
 import os
 import tempfile
 
-from utils import load_well_index, render_sidebar
+from utils import load_well_index, render_sidebar, get_filtered_data, render_filter_summary
 from openff_utils.chem_list_summary import ChemListSummary
 from openff_utils.generate_PDF_report_v1 import PDFReport
 
@@ -27,8 +27,7 @@ if "ws_chem" not in st.session_state:
     st.info("Select a location in the sidebar and click **Find Watershed**.")
     st.stop()
 
-ws_chem: pd.DataFrame = st.session_state["ws_chem"]
-well_gb: pd.DataFrame = st.session_state["well_gb"]
+well_gb, ws_chem = get_filtered_data()
 name: str = st.session_state["watershed_name"]
 huc_scale: int = st.session_state["huc_scale"]
 lat: float = st.session_state["search_lat"]
@@ -37,6 +36,7 @@ lon: float = st.session_state["search_lon"]
 st.subheader(name)
 n_chem = ws_chem["bgCAS"].nunique() if not ws_chem.empty else 0
 st.caption(f"HUC{huc_scale} · {len(well_gb):,} disclosures · {n_chem} chemicals")
+render_filter_summary()
 
 if ws_chem.empty:
     st.warning("No data to report for this watershed.")
@@ -47,8 +47,10 @@ if "in_std_filtered" not in ws_chem.columns:
     ws_chem["in_std_filtered"] = True
 
 if "date" not in ws_chem.columns:
-    date_map = well_gb[["DisclosureId", "date"]].drop_duplicates("DisclosureId")
-    ws_chem = ws_chem.merge(date_map, on="DisclosureId", how="left")
+    well_gb_raw = st.session_state.get("well_gb", pd.DataFrame())
+    if not well_gb_raw.empty and "date" in well_gb_raw.columns:
+        date_map = well_gb_raw[["DisclosureId", "date"]].drop_duplicates("DisclosureId")
+        ws_chem = ws_chem.merge(date_map, on="DisclosureId", how="left")
 
 if st.button("Generate PDF Report", type="primary"):
     with st.spinner("Building report..."):

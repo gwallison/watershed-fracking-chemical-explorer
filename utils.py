@@ -241,15 +241,28 @@ def render_sidebar(well_index: pd.DataFrame):
     Render the shared sidebar on every page.
     Triggers watershed search and updates session state when the button
     is clicked. Call this at the top of every page file.
+
+    Lat/lon are stored under the keys "sidebar_lat" / "sidebar_lon" so that
+    the home-page map can update them programmatically before this function
+    renders the number inputs.
     """
+    # Seed defaults only on first load — after that the keyed widgets own the values
+    if "sidebar_lat" not in st.session_state:
+        st.session_state["sidebar_lat"] = 40.4892
+    if "sidebar_lon" not in st.session_state:
+        st.session_state["sidebar_lon"] = -79.5569
+
     with st.sidebar:
         st.header("Search")
+        st.caption("Or click the map on the home page to set coordinates.")
         lat = st.number_input(
-            "Latitude", value=40.4892, format="%.6f", step=0.001,
+            "Latitude", format="%.6f", step=0.001,
+            key="sidebar_lat",
             help="Decimal degrees — positive for Northern Hemisphere",
         )
         lon = st.number_input(
-            "Longitude", value=-79.5569, format="%.6f", step=0.001,
+            "Longitude", format="%.6f", step=0.001,
+            key="sidebar_lon",
             help="Decimal degrees — negative for Western Hemisphere",
         )
         huc_scale = st.selectbox(
@@ -263,12 +276,137 @@ def render_sidebar(well_index: pd.DataFrame):
             st.divider()
             st.success(f"**{st.session_state['watershed_name']}**")
             st.caption(f"HUC{st.session_state['huc_scale']}")
-            well_gb = st.session_state.get("well_gb", pd.DataFrame())
-            ws_chem = st.session_state.get("ws_chem", pd.DataFrame())
-            n_chem = ws_chem["bgCAS"].nunique() if not ws_chem.empty else 0
-            st.caption(f"{len(well_gb):,} disclosures · {n_chem:,} chemicals")
+            if st.button("New Search", use_container_width=True):
+                for key in [
+                    "containing_watershed", "watershed_name", "huc_scale",
+                    "search_lat", "search_lon",
+                    "ws_disc", "well_gb", "ws_chem",
+                    "filter_year_range", "filter_operator", "_filter_watershed",
+                    "_last_map_click",
+                ]:
+                    st.session_state.pop(key, None)
+                st.rerun()
+            well_gb_raw = st.session_state.get("well_gb", pd.DataFrame())
+            ws_chem_raw = st.session_state.get("ws_chem", pd.DataFrame())
+            n_chem = ws_chem_raw["bgCAS"].nunique() if not ws_chem_raw.empty else 0
+            st.caption(f"{len(well_gb_raw):,} disclosures · {n_chem:,} chemicals")
+
+            # --- Filters (reset whenever the active watershed changes) ---
+            if not well_gb_raw.empty:
+                cur_ws = st.session_state["watershed_name"]
+                if st.session_state.get("_filter_watershed") != cur_ws:
+                    yr_col = well_gb_raw["year"] if "year" in well_gb_raw.columns else None
+                    st.session_state["filter_year_range"] = (
+                        (int(yr_col.min()), int(yr_col.max())) if yr_col is not None
+                        else None
+                    )
+                    st.session_state["filter_operator"] = "All operators"
+                    st.session_state["_filter_watershed"] = cur_ws
+
+                st.divider()
+                st.subheader("Filters")
+
+                if "year" in well_gb_raw.columns:
+                    yr_min = int(well_gb_raw["year"].min())
+                    yr_max = int(well_gb_raw["year"].max())
+                    if yr_min < yr_max:
+                        # Always supply value as a tuple so Streamlit renders a
+                        # range slider (omitting value causes it to default to a
+                        # single-value slider, storing an int and breaking unpacking).
+                        cur_range = st.session_state.get("filter_year_range", (yr_min, yr_max))
+                        if not isinstance(cur_range, (tuple, list)) or len(cur_range) != 2:
+                            cur_range = (yr_min, yr_max)
+                        cur_range = (
+                            max(yr_min, int(cur_range[0])),
+                            min(yr_max, int(cur_range[1])),
+                        )
+                        st.session_state["filter_year_range"] = st.slider(
+                            "Year range",
+                            min_value=yr_min, max_value=yr_max,
+                            value=cur_range,
+                        )
+                    else:
+                        st.session_state["filter_year_range"] = (yr_min, yr_max)
+                        st.caption(f"Year: {yr_min}")
+
+                if "OperatorName" in well_gb_raw.columns:
+                    op_options = ["All operators"] + sorted(
+                        well_gb_raw["OperatorName"].dropna().unique().tolist()
+                    )
+                    cur_op = st.session_state.get("filter_operator", "All operators")
+                    if cur_op not in op_options:
+                        cur_op = "All operators"
+                    st.session_state["filter_operator"] = st.selectbox(
+                        "Operator",
+                        op_options,
+                        index=op_options.index(cur_op),
+                    )
 
     if find_btn:
         with st.spinner("Finding watershed and wells..."):
             _run_watershed_search(lat, lon, huc_scale, well_index)
         st.rerun()
+
+
+# ---------------------------------------------------------------------------
+# Filter helper — call on every page to get year/operator-filtered views
+# ---------------------------------------------------------------------------
+
+def get_filtered_data() -> tuple:
+    """
+    Return (well_gb, ws_chem) with the active year-range and operator filters
+    applied.  The raw session-state data is never mutated.
+    """
+    well_gb = st.session_state.get("well_gb", pd.DataFrame())
+    ws_chem = st.session_state.get("ws_chem", pd.DataFrame())
+
+    if well_gb.empty:
+        return well_gb, ws_chem
+
+    well_gb = well_gb.copy()
+
+    year_range = st.session_state.get("filter_year_range")
+    if year_range and "year" in well_gb.columns:
+        y_min, y_max = year_range
+        well_gb = well_gb[well_gb["year"].between(y_min, y_max)]
+
+    operator = st.session_state.get("filter_operator")
+    if operator and operator != "All operators" and "OperatorName" in well_gb.columns:
+        well_gb = well_gb[well_gb["OperatorName"] == operator]
+
+    if not ws_chem.empty:
+        disc_ids = set(well_gb["DisclosureId"])
+        ws_chem = ws_chem[ws_chem["DisclosureId"].isin(disc_ids)].copy()
+
+    return well_gb, ws_chem
+
+
+def render_filter_summary():
+    """
+    Display a one-line caption describing the active year / operator filters.
+    Call this immediately after the page subheader on any page that uses
+    get_filtered_data().  Renders nothing when no filters are active.
+    """
+    well_gb_raw = st.session_state.get("well_gb", pd.DataFrame())
+    parts = []
+
+    year_range = st.session_state.get("filter_year_range")
+    if year_range and isinstance(year_range, (tuple, list)) and len(year_range) == 2:
+        yr_min_raw = (
+            int(well_gb_raw["year"].min())
+            if "year" in well_gb_raw.columns and not well_gb_raw.empty else None
+        )
+        yr_max_raw = (
+            int(well_gb_raw["year"].max())
+            if "year" in well_gb_raw.columns and not well_gb_raw.empty else None
+        )
+        y0, y1 = int(year_range[0]), int(year_range[1])
+        if yr_min_raw is None or y0 != yr_min_raw or y1 != yr_max_raw:
+            parts.append(f"Years {y0}–{y1}")
+
+    operator = st.session_state.get("filter_operator")
+    if operator and operator != "All operators":
+        parts.append(f"Operator: {operator}")
+
+    if parts:
+        st.caption("Filter active \u2014 " + " \u00b7 ".join(parts))

@@ -14,7 +14,7 @@ import io
 import base64
 from datetime import datetime
 
-from utils import load_well_index, render_sidebar
+from utils import load_well_index, render_sidebar, get_filtered_data
 from openff_utils.chem_list_summary import ChemListSummary
 from openff_utils import text_handlers as th
 
@@ -29,7 +29,7 @@ if "ws_chem" not in st.session_state:
     st.info("Select a location in the sidebar and click **Find Watershed**.")
     st.stop()
 
-ws_chem: pd.DataFrame = st.session_state["ws_chem"]
+_, ws_chem = get_filtered_data()
 name = st.session_state["watershed_name"]
 
 st.subheader(name)
@@ -46,9 +46,10 @@ if "in_std_filtered" not in ws_chem.columns:
     ws_chem["in_std_filtered"] = True
 
 if "date" not in ws_chem.columns:
-    well_gb = st.session_state["well_gb"]
-    date_map = well_gb[["DisclosureId", "date"]].drop_duplicates("DisclosureId")
-    ws_chem = ws_chem.merge(date_map, on="DisclosureId", how="left")
+    well_gb_raw = st.session_state.get("well_gb", pd.DataFrame())
+    if not well_gb_raw.empty and "date" in well_gb_raw.columns:
+        date_map = well_gb_raw[["DisclosureId", "date"]].drop_duplicates("DisclosureId")
+        ws_chem = ws_chem.merge(date_map, on="DisclosureId", how="left")
 
 # ---------------------------------------------------------------------------
 # Build ChemListSummary — reference data (bgCAS.parquet) cached via lru_cache

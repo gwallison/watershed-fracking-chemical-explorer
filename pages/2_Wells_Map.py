@@ -9,7 +9,7 @@ import streamlit as st
 import pandas as pd
 from streamlit_folium import st_folium
 
-from utils import load_well_index, render_sidebar
+from utils import load_well_index, render_sidebar, get_filtered_data, render_filter_summary
 from openff_utils.mapping import create_integrated_point_map
 
 st.set_page_config(page_title="Wells Map", layout="wide")
@@ -23,12 +23,13 @@ if "well_gb" not in st.session_state:
     st.info("Select a location in the sidebar and click **Find Watershed**.")
     st.stop()
 
-well_gb: pd.DataFrame = st.session_state["well_gb"]
+well_gb, _ = get_filtered_data()
 watershed = st.session_state["containing_watershed"]
 name = st.session_state["watershed_name"]
 
 st.subheader(name)
 st.caption(f"{len(well_gb):,} disclosures from {well_gb.OperatorName.nunique()} operators")
+render_filter_summary()
 
 if well_gb.empty:
     st.warning("No wells found within this watershed.")

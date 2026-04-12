@@ -2,19 +2,29 @@
 Watershed Chemical Explorer — home page.
 
 Entry point for `streamlit run app.py`.
-Shows overview metrics once a watershed is selected; each sub-page
-handles a specific aspect of the analysis.
+Shows an interactive map for point selection before a watershed is chosen;
+shows overview metrics once a watershed is selected.
 """
 
+import folium
 import streamlit as st
 import pandas as pd
+from streamlit_folium import st_folium
 
-from utils import load_well_index, render_sidebar
+from utils import load_well_index, render_sidebar, get_filtered_data
 
 st.set_page_config(
     page_title="Watershed Chemical Explorer",
     layout="wide",
 )
+
+# Transfer any pending map-click coordinates into the widget keys BEFORE
+# render_sidebar instantiates the number inputs (Streamlit forbids writing to
+# a keyed widget's session state after it has rendered in the same run).
+if "_pending_lat" in st.session_state:
+    st.session_state["sidebar_lat"] = st.session_state.pop("_pending_lat")
+if "_pending_lon" in st.session_state:
+    st.session_state["sidebar_lon"] = st.session_state.pop("_pending_lon")
 
 well_index = load_well_index()
 render_sidebar(well_index)
@@ -22,15 +32,43 @@ render_sidebar(well_index)
 st.title("Watershed Chemical Explorer")
 
 if "watershed_name" not in st.session_state:
-    st.info(
-        "Enter coordinates in the sidebar and click **Find Watershed** to begin.\n\n"
-        "This tool identifies the USGS watershed containing your selected point "
-        "and explores FracFocus chemical disclosures for wells within that watershed."
+    st.markdown(
+        "Click the map to set your focal point, choose a **HUC Scale** in the "
+        "sidebar, then click **Find Watershed**."
     )
+
+    # --- interactive point-selection map ---
+    cur_lat = st.session_state.get("sidebar_lat", 40.4892)
+    cur_lon = st.session_state.get("sidebar_lon", -79.5569)
+
+    m = folium.Map(location=[cur_lat, cur_lon], zoom_start=7,
+                   tiles="CartoDB positron")
+
+    # marker for the currently selected point
+    folium.Marker(
+        [cur_lat, cur_lon],
+        tooltip=f"Selected: {cur_lat:.5f}, {cur_lon:.5f}",
+        icon=folium.Icon(color="red", icon="crosshairs", prefix="fa"),
+    ).add_to(m)
+
+    result = st_folium(m, use_container_width=True, height=500,
+                       returned_objects=["last_clicked"])
+
+    # propagate map click → pending keys (transferred to widget keys at top of next run)
+    if result and result.get("last_clicked"):
+        clicked = result["last_clicked"]
+        new_lat = round(clicked["lat"], 6)
+        new_lon = round(clicked["lng"], 6)
+        prev = st.session_state.get("_last_map_click")
+        if prev != (new_lat, new_lon):
+            st.session_state["_pending_lat"] = new_lat
+            st.session_state["_pending_lon"] = new_lon
+            st.session_state["_last_map_click"] = (new_lat, new_lon)
+            st.rerun()
+
     st.stop()
 
-well_gb: pd.DataFrame = st.session_state["well_gb"]
-ws_chem: pd.DataFrame = st.session_state["ws_chem"]
+well_gb, ws_chem = get_filtered_data()
 
 st.subheader(st.session_state["watershed_name"])
 st.caption(f"HUC{st.session_state['huc_scale']}")
