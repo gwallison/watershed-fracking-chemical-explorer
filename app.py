@@ -73,11 +73,21 @@ well_gb, ws_chem = get_filtered_data()
 st.subheader(st.session_state["watershed_name"])
 st.caption(f"HUC{st.session_state['huc_scale']}")
 
+if well_gb.empty:
+    st.warning(
+        "No FracFocus disclosures found within this watershed. "
+        "Try a different location or a broader HUC scale."
+    )
+    st.stop()
+
+n_operators = well_gb["OperatorName"].nunique() if "OperatorName" in well_gb.columns else 0
+n_chemicals = ws_chem["bgCAS"].nunique() if not ws_chem.empty else 0
+
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("Disclosures", f"{len(well_gb):,}")
 col2.metric("Chemical records", f"{len(ws_chem):,}")
-col3.metric("Unique chemicals", f"{ws_chem['bgCAS'].nunique():,}" if not ws_chem.empty else "0")
-col4.metric("Unique operators", f"{well_gb['OperatorName'].nunique():,}")
+col3.metric("Unique chemicals", f"{n_chemicals:,}")
+col4.metric("Unique operators", f"{n_operators:,}")
 
 st.divider()
 st.markdown(
