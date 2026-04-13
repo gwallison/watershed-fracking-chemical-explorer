@@ -118,6 +118,7 @@ def show_simple_map_and_shape(lat,lon,clickable=False,include_shape=False,
         name='Google Satellite',
         overlay=False,
         control=True,
+        show=False,
         subdomains=['mt0', 'mt1', 'mt2', 'mt3']
     ).add_to(m)
         
@@ -150,6 +151,7 @@ def show_simple_map(lat,lon,clickable=False,
         name='Google Satellite',
         overlay=False,
         control=True,
+        show=False,
         subdomains=['mt0', 'mt1', 'mt2', 'mt3']
     ).add_to(m)
     
@@ -195,6 +197,7 @@ def showWells(fulldf,flat,flon,apilst,def_buffer=def_buffer,
         name='Google Satellite',
         overlay=False,
         control=True,
+        show=False,
         subdomains=['mt0', 'mt1', 'mt2', 'mt3']
     ).add_to(m)
 
@@ -235,6 +238,7 @@ def showDisclosures(fulldf,flat,flon,disclst,def_buffer=def_buffer):
         name='Google Satellite',
         overlay=False,
         control=True,
+        show=False,
         subdomains=['mt0', 'mt1', 'mt2', 'mt3']
     ).add_to(m)
 
@@ -289,6 +293,7 @@ def showWells_in_area(fulldf,area_df,apilst,width=600,height=400):
         name='Google Satellite',
         overlay=False,
         control=True,
+        show=False,
         subdomains=['mt0', 'mt1', 'mt2', 'mt3']
     ).add_to(m)
 
@@ -363,6 +368,7 @@ def create_point_map(data,include_mini_map=False,inc_disc_link=True,include_shap
         name='Google Satellite',
         overlay=False,
         control=True,
+        show=False,
         subdomains=['mt0', 'mt1', 'mt2', 'mt3']
     ).add_to(m)
 
@@ -544,6 +550,7 @@ def create_integrated_point_map(data,include_mini_map=False,inc_disc_link=True,
         name='Google Satellite',
         overlay=False,
         control=True,
+        show=False,
         subdomains=['mt0', 'mt1', 'mt2', 'mt3']
     ).add_to(m)
 

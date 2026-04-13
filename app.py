@@ -42,7 +42,7 @@ if "watershed_name" not in st.session_state:
     cur_lon = st.session_state.get("sidebar_lon", -79.5569)
 
     m = folium.Map(location=[cur_lat, cur_lon], zoom_start=7,
-                   tiles="CartoDB positron")
+                   tiles="openstreetmap")
 
     # marker for the currently selected point
     folium.Marker(
