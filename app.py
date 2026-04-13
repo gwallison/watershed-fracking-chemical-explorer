@@ -29,7 +29,7 @@ if "_pending_lon" in st.session_state:
 well_index = load_well_index()
 render_sidebar(well_index)
 
-st.title("Watershed Chemical Explorer")
+st.title("Pennsylvania Watershed Chemical Explorer")
 
 if "watershed_name" not in st.session_state:
     st.markdown(
