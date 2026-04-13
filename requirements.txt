@@ -10,3 +10,4 @@ seaborn
 pyarrow
 reportlab
 numpy
+contextily
