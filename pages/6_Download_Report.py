@@ -8,6 +8,7 @@ Built directly with reportlab — does not use the PDFReport class.
 """
 
 import io
+import os
 
 import matplotlib
 matplotlib.use("Agg")
@@ -31,6 +32,9 @@ from reportlab.platypus import (
     Table,
     TableStyle,
 )
+from reportlab.platypus.flowables import Flowable
+
+_ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets")
 
 from utils import load_well_index, render_sidebar, get_filtered_data, render_filter_summary
 
@@ -68,6 +72,55 @@ _ROW_ALT = colors.HexColor("#eaf4fb")
 _GRID_LINE = colors.HexColor("#cccccc")
 
 _EXCLUDE_CAS = {"non_chem_record", "ambiguousID", "conflictingID", "sysAppMeta"}
+
+# ============================================================
+# Clickable image flowable
+# ============================================================
+
+class LinkedImage(Flowable):
+    """A reportlab Flowable that draws an image and attaches a URL annotation."""
+
+    def __init__(self, path: str, url: str, width: float, height: float):
+        super().__init__()
+        self.path = path
+        self.url = url
+        self.width = width
+        self.height = height
+
+    def wrap(self, *_):
+        return self.width, self.height
+
+    def draw(self):
+        self.canv.drawImage(
+            self.path, 0, 0, self.width, self.height,
+            preserveAspectRatio=True, anchor="c", mask="auto",
+        )
+        self.canv.linkURL(self.url, (0, 0, self.width, self.height), relative=1)
+
+
+def _logo_row() -> Table | None:
+    """Return a Table with the two partner logos side-by-side, or None if files missing."""
+    openff_path = os.path.join(_ASSETS_DIR, "openFF_logo.png")
+    ft_path = os.path.join(_ASSETS_DIR, "FracTracker_logo.png")
+    if not (os.path.exists(openff_path) and os.path.exists(ft_path)):
+        return None
+
+    logo_h = 0.55 * inch          # common display height
+    openff_w = logo_h * 1.01      # openFF logo is square
+    ft_w = logo_h * 4.68          # FracTracker logo aspect ratio
+
+    openff_img = LinkedImage(openff_path, "https://frackingchemicaldisclosure.wordpress.com/", openff_w, logo_h)
+    ft_img     = LinkedImage(ft_path,     "https://www.fractracker.org/",                      ft_w,     logo_h)
+
+    spacer_w = 0.4 * inch
+    row = [[openff_img, Spacer(spacer_w, 1), ft_img]]
+    t = Table(row, colWidths=[openff_w, spacer_w, ft_w])
+    t.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+    ]))
+    return t
+
 
 # ============================================================
 # Style helpers
@@ -138,11 +191,15 @@ def _alt_rows(n_rows: int) -> list:
 # ============================================================
 
 def _fig_to_rl_image(fig, width_in: float = 6.5) -> Image:
+    """Save figure to a reportlab Image, preserving the exact figsize aspect ratio."""
+    fig_w, fig_h = fig.get_size_inches()
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=120, bbox_inches="tight")
+    # Save without bbox_inches="tight" so the file dimensions match figsize exactly.
+    fig.savefig(buf, format="png", dpi=120)
     buf.seek(0)
     plt.close(fig)
-    return Image(buf, width=width_in * inch)
+    height_in = width_in * fig_h / fig_w
+    return Image(buf, width=width_in * inch, height=height_in * inch)
 
 
 # ============================================================
@@ -217,6 +274,10 @@ def _cover_page(story, s, well_gb, ws_chem, name, huc_scale, lat, lon):
         "Watershed Chemical Explorer.",
         s["body"],
     ))
+    story.append(Spacer(1, 0.18 * inch))
+    logos = _logo_row()
+    if logos:
+        story.append(logos)
     story.append(PageBreak())
 
 
@@ -288,7 +349,7 @@ def _water_section(story, s, well_gb):
     ))
 
     fmt = mticker.FuncFormatter(lambda x, _: f"{x/1e6:.1f}M" if x >= 1e6 else f"{x/1e3:.0f}K")
-    fig, (ax_s, ax_b) = plt.subplots(1, 2, figsize=(9, 3.5))
+    fig, (ax_s, ax_b) = plt.subplots(1, 2, figsize=(8, 2.8))
 
     ax_s.scatter(wv["date"], wv[wv_col], alpha=0.45, s=10,
                  color="#2980b9", linewidths=0)
