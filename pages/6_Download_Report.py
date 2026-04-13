@@ -98,26 +98,37 @@ class LinkedImage(Flowable):
         self.canv.linkURL(self.url, (0, 0, self.width, self.height), relative=1)
 
 
-def _logo_row() -> Table | None:
-    """Return a Table with the two partner logos side-by-side, or None if files missing."""
-    openff_path = os.path.join(_ASSETS_DIR, "openFF_logo.png")
-    ft_path = os.path.join(_ASSETS_DIR, "FracTracker_logo.png")
-    if not (os.path.exists(openff_path) and os.path.exists(ft_path)):
+def _openff_logo_centered() -> Table | None:
+    """Return a centered OpenFF logo at display height 1.1 inch, or None if missing."""
+    path = os.path.join(_ASSETS_DIR, "openFF_logo.png")
+    if not os.path.exists(path):
         return None
-
-    logo_h = 0.55 * inch          # common display height
-    openff_w = logo_h * 1.01      # openFF logo is square
-    ft_w = logo_h * 4.68          # FracTracker logo aspect ratio
-
-    openff_img = LinkedImage(openff_path, "https://frackingchemicaldisclosure.wordpress.com/", openff_w, logo_h)
-    ft_img     = LinkedImage(ft_path,     "https://www.fractracker.org/",                      ft_w,     logo_h)
-
-    spacer_w = 0.4 * inch
-    row = [[openff_img, Spacer(spacer_w, 1), ft_img]]
-    t = Table(row, colWidths=[openff_w, spacer_w, ft_w])
+    logo_h = 1.1 * inch
+    logo_w = logo_h * 1.01      # logo is square
+    img = LinkedImage(path, "https://open-ff.org/", logo_w, logo_h)
+    # Wrap in a full-width table so the logo is centred on the page
+    page_w = 7.0 * inch         # content width (8.5 - 2×0.75 margins)
+    t = Table([[img]], colWidths=[page_w])
     t.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("ALIGN", (0, 0), (0, 0), "CENTER"),
+        ("VALIGN", (0, 0), (0, 0), "MIDDLE"),
+    ]))
+    return t
+
+
+def _fractracker_logo() -> Table | None:
+    """Return the FracTracker Alliance logo as a flowable, or None if missing."""
+    path = os.path.join(_ASSETS_DIR, "FracTracker_logo.png")
+    if not os.path.exists(path):
+        return None
+    logo_h = 0.55 * inch
+    logo_w = logo_h * 4.68      # FracTracker logo aspect ratio
+    img = LinkedImage(path, "https://www.fractracker.org/", logo_w, logo_h)
+    page_w = 7.0 * inch
+    t = Table([[img]], colWidths=[page_w])
+    t.setStyle(TableStyle([
+        ("ALIGN", (0, 0), (0, 0), "CENTER"),
+        ("VALIGN", (0, 0), (0, 0), "MIDDLE"),
     ]))
     return t
 
@@ -207,7 +218,11 @@ def _fig_to_rl_image(fig, width_in: float = 6.5) -> Image:
 # ============================================================
 
 def _cover_page(story, s, well_gb, ws_chem, name, huc_scale, lat, lon):
-    story.append(Spacer(1, 0.35 * inch))
+    openff = _openff_logo_centered()
+    if openff:
+        story.append(Spacer(1, 0.15 * inch))
+        story.append(openff)
+    story.append(Spacer(1, 0.2 * inch))
     story.append(Paragraph("Pennsylvania Watershed Chemical Explorer", s["title"]))
     story.append(Paragraph("Fracking Chemical Disclosure Report", s["subtitle"]))
     story.append(HRFlowable(width="100%", thickness=2, color=_BRAND_BLUE, spaceAfter=12))
@@ -275,9 +290,9 @@ def _cover_page(story, s, well_gb, ws_chem, name, huc_scale, lat, lon):
         s["body"],
     ))
     story.append(Spacer(1, 0.18 * inch))
-    logos = _logo_row()
-    if logos:
-        story.append(logos)
+    ft = _fractracker_logo()
+    if ft:
+        story.append(ft)
     story.append(PageBreak())
 
 
