@@ -40,7 +40,7 @@ render_filter_summary()
 # ---------------------------------------------------------------------------
 # Filter pseudo-CAS identifiers
 # ---------------------------------------------------------------------------
-_EXCLUDE_CAS = {"non_chem_record", "ambiguousID", "conflictingID"}
+_EXCLUDE_CAS = {"non_chem_record", "ambiguousID", "conflictingID", "sysAppMeta"}
 ws_chem = ws_chem[~ws_chem["bgCAS"].isin(_EXCLUDE_CAS)].copy()
 
 # Ensure date → year column (date was joined during watershed search)
