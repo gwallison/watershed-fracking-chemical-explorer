@@ -120,6 +120,6 @@ yr_table["Max (K gal)"] = (yr_table["Max_gal"] / 1e3).round(1)
 
 st.dataframe(
     yr_table[["Year", "Events", "Total (M gal)", "Median (K gal)", "Max (K gal)"]],
-    use_container_width=True,
+    width="stretch",
     hide_index=True,
 )

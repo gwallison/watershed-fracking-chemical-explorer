@@ -95,6 +95,7 @@ st.markdown(
     "- **Watershed Map** — boundary and focal point\n"
     "- **Wells Map** — well locations within the watershed\n"
     "- **Chemical Summary** — disclosed chemicals and hazard flags\n"
+    "- **Trade Secrets** — proprietary ingredients grouped by supplied name\n"
     "- **Water Use** — water volume per fracking event over time\n"
     "- **Download Report** — generate a PDF summary"
 )

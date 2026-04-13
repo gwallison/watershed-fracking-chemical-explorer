@@ -1,22 +1,18 @@
 """
 Page 3 — Chemical Summary
 
-Summarizes the chemicals disclosed in FracFocus for wells within the
-selected watershed, including hazard-list flags and mass estimates.
+Summarizes chemicals disclosed in FracFocus for wells within the
+selected watershed, including a mass-by-year sparkline per chemical.
 """
 
-import streamlit as st
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
-import io
 import base64
-from datetime import datetime
+import io
 
-from utils import load_well_index, render_sidebar, get_filtered_data
-from openff_utils.chem_list_summary import ChemListSummary
-from openff_utils import text_handlers as th
+import matplotlib.pyplot as plt
+import pandas as pd
+import streamlit as st
+
+from utils import load_well_index, render_sidebar, get_filtered_data, render_filter_summary
 
 st.set_page_config(page_title="Chemical Summary", layout="wide")
 
@@ -33,98 +29,111 @@ _, ws_chem = get_filtered_data()
 name = st.session_state["watershed_name"]
 
 st.subheader(name)
-st.caption(f"{ws_chem['bgCAS'].nunique()} unique chemicals · {len(ws_chem):,} records")
 
 if ws_chem.empty:
     st.warning("No chemical records found for this watershed.")
     st.stop()
 
-# ChemListSummary expects an `in_std_filtered` column; ws_chem is already
-# filtered but the column must be present for the class internals.
-if "in_std_filtered" not in ws_chem.columns:
-    ws_chem = ws_chem.copy()
-    ws_chem["in_std_filtered"] = True
-
-if "date" not in ws_chem.columns:
-    well_gb_raw = st.session_state.get("well_gb", pd.DataFrame())
-    if not well_gb_raw.empty and "date" in well_gb_raw.columns:
-        date_map = well_gb_raw[["DisclosureId", "date"]].drop_duplicates("DisclosureId")
-        ws_chem = ws_chem.merge(date_map, on="DisclosureId", how="left")
+st.caption(f"{ws_chem['bgCAS'].nunique():,} unique chemicals · {len(ws_chem):,} records")
+render_filter_summary()
 
 # ---------------------------------------------------------------------------
-# Build ChemListSummary — reference data (bgCAS.parquet) cached via lru_cache
+# Filter pseudo-CAS identifiers
 # ---------------------------------------------------------------------------
-with st.spinner("Building chemical summary..."):
-    chem_obj = ChemListSummary(ws_chem, summarize_by_chem=True,
-                               ignore_duplicates=True, use_remote=True)
-    chem_df = chem_obj.get_display_table(colset="colab_v1")
+_EXCLUDE_CAS = {"non_chem_record", "ambiguousID", "conflictingID"}
+ws_chem = ws_chem[~ws_chem["bgCAS"].isin(_EXCLUDE_CAS)].copy()
+
+# Ensure date → year column (date was joined during watershed search)
+ws_chem["date"] = pd.to_datetime(ws_chem["date"], errors="coerce")
+ws_chem["year"] = ws_chem["date"].dt.year
+
+yr_min = int(ws_chem["year"].dropna().min()) if ws_chem["year"].notna().any() else 2011
+yr_max = int(ws_chem["year"].dropna().max()) if ws_chem["year"].notna().any() else 2025
+all_years = list(range(yr_min, yr_max + 1))
 
 # ---------------------------------------------------------------------------
-# Sparkline helper
+# Pre-compute year × chemical mass matrix (one groupby for all sparklines)
 # ---------------------------------------------------------------------------
-THIS_YEAR = datetime.today().year
+year_mass = (
+    ws_chem.groupby(["bgCAS", "year"])["mass"]
+    .sum()
+    .unstack(level="year")        # columns = years
+    .reindex(columns=all_years, fill_value=0)
+    .fillna(0)
+)
 
-def mass_sparkline_html(cas: str, data: pd.DataFrame) -> str:
-    """Return a base64 PNG <img> tag showing mass by year for a CAS number."""
-    c = data.CASNumber == cas
-    tmp = data[c].copy()
-    tmp["year"] = tmp.date.dt.year
-    gb = tmp.groupby("year", as_index=False)["mass"].sum()
-    yrs = pd.DataFrame({"year": range(2011, THIS_YEAR + 1)})
-    gb = gb.merge(yrs, how="outer").fillna({"mass": 0})
+# ---------------------------------------------------------------------------
+# Sparkline generator
+# ---------------------------------------------------------------------------
+def _sparkline(cas: str) -> str:
+    """Return a PNG data URI bar chart for this CAS across all_years."""
+    vals = year_mass.loc[cas].values if cas in year_mass.index else [0] * len(all_years)
+    fig, ax = plt.subplots(figsize=(2, 0.8))
 
-    sns.set_theme(style="white")
-    fig, ax = plt.subplots(figsize=(2, 0.75))
-    sns.barplot(data=gb, x="year", y="mass", errorbar=None, width=1, ax=ax)
-    ax.set_xlabel("")
-    ax.set_ylabel("")
-    years = sorted(gb["year"].unique())
-    ticks = range(len(years))
-    labels = [str(y) if i in (0, len(years) - 1) else "" for i, y in enumerate(years)]
-    ax.set_xticks(ticks)
-    ax.set_xticklabels(labels, fontsize=7)
-    ax.set_yticklabels([])
-    sns.despine()
+    ax.bar(range(len(vals)), vals, width=0.85, color="steelblue", linewidth=0)
+
+    # Grey background defines the plot area edges; figure patch is transparent
+    # so the cell background shows through outside the axes.
+    # NOTE: do NOT pass transparent=True to savefig — it overrides ax.facecolor.
+    ax.set_facecolor("#b8b8b8")
+    fig.patch.set_facecolor("none")
+
+    ax.set_xlim(-0.6, len(all_years) - 0.4)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for spine in ax.spines.values():
+        spine.set_visible(False)
 
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", bbox_inches="tight")
+    fig.savefig(buf, format="png", dpi=72, bbox_inches="tight")
     plt.close(fig)
-    data_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-    return f'<img src="data:image/png;base64,{data_b64}" width="140">'
-
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
 
 # ---------------------------------------------------------------------------
-# Display table with sparklines
+# Aggregate one row per chemical
 # ---------------------------------------------------------------------------
-st.subheader("Chemical disclosure summary")
+chem_table = (
+    ws_chem.groupby("bgCAS", as_index=False)
+    .agg(
+        Name=("epa_pref_name", "first"),
+        total_records=("mass", "size"),
+        records_with_mass=("mass", lambda x: (x > 0).sum()),
+        total_mass=("mass", lambda x: x.sum(min_count=1)),
+    )
+    .assign(**{"Records (total | w/mass)": lambda d:
+        d["total_records"].astype(str) + " | " + d["records_with_mass"].astype(str)})
+    .drop(columns=["total_records", "records_with_mass"])
+    .rename(columns={"bgCAS": "CASRN", "total_mass": "Total Mass (pounds)"})
+    .sort_values("Total Mass (pounds)", ascending=False, na_position="last")
+    .reset_index(drop=True)
+)
 
-# Build a simplified display table (avoid HTML columns that don't render in st.dataframe)
-display_rows = []
-for _, row in chem_df.iterrows():
-    cas = row.get("bgCAS", "")
-    sparkline = mass_sparkline_html(cas, ws_chem) if cas and cas in ws_chem.CASNumber.values else ""
-    display_rows.append({
-        "bgCAS": cas,
-        "Name": row.get("composite_id", ""),   # HTML — rendered below
-        "Records": row.get("tot_records", ""),
-        "w/ Mass": row.get("num_w_mass", ""),
-        "Total Mass (lbs)": row.get("tot_mass", ""),
-        "RQ (lbs)": row.get("rq_lbs", ""),
-        "Hazard Lists": row.get("extrnl", ""),  # HTML
-        "Mass by Year": sparkline,              # HTML
-    })
+with st.spinner("Generating sparklines…"):
+    chem_table["Mass by Year"] = chem_table["CASRN"].apply(_sparkline)
 
-html_df = pd.DataFrame(display_rows)
+_NO_LINK_CAS = {"proprietary", "7732-18-5"}
+chem_table["Link"] = chem_table["CASRN"].apply(
+    lambda cas: None if cas in _NO_LINK_CAS
+    else f"https://storage.googleapis.com/open-ff-chem-profiles/chemicals/{cas}.html"
+)
 
-# Render as HTML so the embedded images and links work
-html_table = html_df.to_html(escape=False, index=False, classes="chem-table")
-styled = f"""
-<style>
-  .chem-table {{ border-collapse: collapse; width: 100%; font-size: 0.85rem; }}
-  .chem-table th {{ background-color: #2c3e50; color: white; padding: 6px 10px; text-align: left; }}
-  .chem-table td {{ padding: 4px 10px; border-bottom: 1px solid #ddd; vertical-align: middle; }}
-  .chem-table tr:hover {{ background-color: #f5f5f5; }}
-</style>
-{html_table}
-"""
-st.markdown(styled, unsafe_allow_html=True)
+chem_table = chem_table[
+    ["CASRN", "Name", "Records (total | w/mass)", "Total Mass (pounds)", "Mass by Year", "Link"]
+]
+
+# ---------------------------------------------------------------------------
+# Display
+# ---------------------------------------------------------------------------
+st.dataframe(
+    chem_table,
+    width="stretch",
+    hide_index=True,
+    column_config={
+        "Name": st.column_config.TextColumn(width="large"),
+        "Total Mass (pounds)": st.column_config.NumberColumn(format="%,.1f"),
+        "Mass by Year": st.column_config.ImageColumn(
+            f"Mass by Year ({yr_min}–{yr_max})", width="medium"
+        ),
+        "Link": st.column_config.LinkColumn("Link", display_text="Hazard Info"),
+    },
+)
