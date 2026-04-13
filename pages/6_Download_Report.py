@@ -1,20 +1,38 @@
 """
-Page 4 — Download Report
+Page 6 — Download Report
 
-Generates a PDF summary report for the selected watershed and offers
-it as a Streamlit download button.
+Generates a professional PDF summary report for the selected watershed
+and offers it as a Streamlit download button.
+
+Built directly with reportlab — does not use the PDFReport class.
 """
 
-import streamlit as st
-import pandas as pd
-import matplotlib.pyplot as plt
 import io
-import os
-import tempfile
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
+import pandas as pd
+import streamlit as st
+
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.platypus import (
+    HRFlowable,
+    Image,
+    PageBreak,
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
+    Table,
+    TableStyle,
+)
 
 from utils import load_well_index, render_sidebar, get_filtered_data, render_filter_summary
-from openff_utils.chem_list_summary import ChemListSummary
-from openff_utils.generate_PDF_report_v1 import PDFReport
 
 st.set_page_config(page_title="Download Report", layout="wide")
 
@@ -34,78 +52,426 @@ lat: float = st.session_state["search_lat"]
 lon: float = st.session_state["search_lon"]
 
 st.subheader(name)
-n_chem = ws_chem["bgCAS"].nunique() if not ws_chem.empty else 0
-st.caption(f"HUC{huc_scale} · {len(well_gb):,} disclosures · {n_chem} chemicals")
+n_chem_display = ws_chem["bgCAS"].nunique() if not ws_chem.empty else 0
+st.caption(f"HUC{huc_scale} · {len(well_gb):,} disclosures · {n_chem_display} chemicals")
 render_filter_summary()
 
 if ws_chem.empty:
     st.warning("No data to report for this watershed.")
     st.stop()
 
-if "in_std_filtered" not in ws_chem.columns:
-    ws_chem = ws_chem.copy()
-    ws_chem["in_std_filtered"] = True
+# ============================================================
+# Colour palette
+# ============================================================
+_BRAND_BLUE = colors.HexColor("#1a5276")
+_ROW_ALT = colors.HexColor("#eaf4fb")
+_GRID_LINE = colors.HexColor("#cccccc")
 
-if "date" not in ws_chem.columns:
-    well_gb_raw = st.session_state.get("well_gb", pd.DataFrame())
-    if not well_gb_raw.empty and "date" in well_gb_raw.columns:
-        date_map = well_gb_raw[["DisclosureId", "date"]].drop_duplicates("DisclosureId")
-        ws_chem = ws_chem.merge(date_map, on="DisclosureId", how="left")
+_EXCLUDE_CAS = {"non_chem_record", "ambiguousID", "conflictingID", "sysAppMeta"}
+
+# ============================================================
+# Style helpers
+# ============================================================
+
+def _styles() -> dict:
+    s = {}
+    s["title"] = ParagraphStyle(
+        "RTitle", fontSize=20, fontName="Helvetica-Bold",
+        textColor=_BRAND_BLUE, spaceAfter=6, alignment=TA_CENTER,
+    )
+    s["subtitle"] = ParagraphStyle(
+        "RSubtitle", fontSize=13, fontName="Helvetica",
+        textColor=_BRAND_BLUE, spaceAfter=4, alignment=TA_CENTER,
+    )
+    s["watershed"] = ParagraphStyle(
+        "RWatershed", fontSize=15, fontName="Helvetica-Bold",
+        textColor=colors.black, alignment=TA_CENTER, spaceAfter=14,
+    )
+    s["section"] = ParagraphStyle(
+        "RSection", fontSize=12, fontName="Helvetica-Bold",
+        textColor=_BRAND_BLUE, spaceBefore=10, spaceAfter=5,
+    )
+    s["body"] = ParagraphStyle(
+        "RBody", fontSize=9, fontName="Helvetica", leading=13, spaceAfter=4,
+    )
+    s["meta_label"] = ParagraphStyle(
+        "RMetaLabel", fontSize=8.5, fontName="Helvetica-Bold",
+        textColor=colors.HexColor("#444444"),
+    )
+    s["meta_value"] = ParagraphStyle(
+        "RMetaValue", fontSize=8.5, fontName="Helvetica",
+    )
+    s["th"] = ParagraphStyle(
+        "RTH", fontSize=8, fontName="Helvetica-Bold",
+        textColor=colors.white, alignment=TA_CENTER, leading=10,
+    )
+    s["td"] = ParagraphStyle(
+        "RTD", fontSize=7.5, fontName="Helvetica", leading=10,
+    )
+    s["td_c"] = ParagraphStyle(
+        "RTDc", fontSize=7.5, fontName="Helvetica", leading=10, alignment=TA_CENTER,
+    )
+    s["td_r"] = ParagraphStyle(
+        "RTDr", fontSize=7.5, fontName="Helvetica", leading=10, alignment=TA_RIGHT,
+    )
+    return s
+
+
+_TABLE_BASE = [
+    ("BACKGROUND", (0, 0), (-1, 0), _BRAND_BLUE),
+    ("GRID", (0, 0), (-1, -1), 0.25, _GRID_LINE),
+    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+    ("TOPPADDING", (0, 0), (-1, -1), 2),
+    ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+    ("LEFTPADDING", (0, 0), (-1, -1), 3),
+    ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+]
+
+
+def _alt_rows(n_rows: int) -> list:
+    """Return ROWBACKGROUNDS command alternating white / light-blue for data rows."""
+    return [("ROWBACKGROUNDS", (0, 1), (-1, n_rows - 1), [colors.white, _ROW_ALT])]
+
+
+# ============================================================
+# Figure helper
+# ============================================================
+
+def _fig_to_rl_image(fig, width_in: float = 6.5) -> Image:
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=120, bbox_inches="tight")
+    buf.seek(0)
+    plt.close(fig)
+    return Image(buf, width=width_in * inch)
+
+
+# ============================================================
+# Section builders
+# ============================================================
+
+def _cover_page(story, s, well_gb, ws_chem, name, huc_scale, lat, lon):
+    story.append(Spacer(1, 0.35 * inch))
+    story.append(Paragraph("Pennsylvania Watershed Chemical Explorer", s["title"]))
+    story.append(Paragraph("Fracking Chemical Disclosure Report", s["subtitle"]))
+    story.append(HRFlowable(width="100%", thickness=2, color=_BRAND_BLUE, spaceAfter=12))
+    story.append(Paragraph(name, s["watershed"]))
+
+    # Gather metrics
+    wv_col = "TotalBaseWaterVolume"
+    dates = pd.to_datetime(well_gb.get("date", pd.Series(dtype="object")), errors="coerce")
+    date_range = (f"{int(dates.min().year)}–{int(dates.max().year)}"
+                  if dates.notna().any() else "—")
+    total_water = well_gb[wv_col].sum() if wv_col in well_gb.columns else 0
+    n_ops = well_gb["OperatorName"].nunique() if "OperatorName" in well_gb.columns else 0
+    n_id_chem = ws_chem[~ws_chem["bgCAS"].isin(_EXCLUDE_CAS | {"proprietary"})]["bgCAS"].nunique()
+    n_prop = ws_chem[ws_chem["bgCAS"] == "proprietary"]["IngredientName"].nunique()
+
+    yr_range = st.session_state.get("filter_year_range")
+    op_filter = st.session_state.get("filter_operator", "All operators")
+    filter_parts = []
+    if yr_range and isinstance(yr_range, (tuple, list)) and len(yr_range) == 2:
+        filter_parts.append(f"Years {yr_range[0]}–{yr_range[1]}")
+    if op_filter and op_filter != "All operators":
+        filter_parts.append(f"Operator: {op_filter}")
+
+    meta_pairs = [
+        ("HUC Scale", f"HUC{huc_scale}"),
+        ("Target point", f"{lat:.5f}, {lon:.5f}"),
+        ("Disclosure date range", date_range),
+        ("Total disclosures", f"{len(well_gb):,}"),
+        ("Unique operators", f"{n_ops:,}"),
+        ("Total water used", f"{total_water / 1e6:.1f} M gal" if total_water > 0 else "—"),
+        ("Identified chemicals", f"{n_id_chem:,}"),
+        ("Trade secret ingredients", f"{n_prop:,}"),
+    ]
+    if filter_parts:
+        meta_pairs.append(("Active filters", " · ".join(filter_parts)))
+
+    # Two-column key/value grid
+    mid = (len(meta_pairs) + 1) // 2
+    rows = []
+    for i in range(mid):
+        lk, lv = meta_pairs[i]
+        rk, rv = meta_pairs[i + mid] if i + mid < len(meta_pairs) else ("", "")
+        rows.append([
+            Paragraph(lk, s["meta_label"]),
+            Paragraph(lv, s["meta_value"]),
+            Paragraph(rk, s["meta_label"]),
+            Paragraph(rv, s["meta_value"]),
+        ])
+    cw = [1.3 * inch, 2.0 * inch, 1.3 * inch, 2.0 * inch]
+    meta_t = Table(rows, colWidths=cw)
+    meta_t.setStyle(TableStyle([
+        ("ROWBACKGROUNDS", (0, 0), (-1, -1), [colors.white, _ROW_ALT]),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+    ]))
+    story.append(meta_t)
+    story.append(Spacer(1, 0.2 * inch))
+    story.append(Paragraph(
+        "This report summarizes chemicals disclosed in FracFocus for fracking wells "
+        "within the selected USGS watershed. Generated by the Open-FF Pennsylvania "
+        "Watershed Chemical Explorer.",
+        s["body"],
+    ))
+    story.append(PageBreak())
+
+
+def _disclosures_section(story, s, well_gb):
+    dates = pd.to_datetime(well_gb.get("date", pd.Series(dtype="object")), errors="coerce")
+    date_range = (f"{int(dates.min().year)}–{int(dates.max().year)}"
+                  if dates.notna().any() else "—")
+    n_ops = well_gb["OperatorName"].nunique() if "OperatorName" in well_gb.columns else 0
+
+    story.append(Paragraph("Fracking Disclosures", s["section"]))
+    story.append(Paragraph(
+        f"{len(well_gb):,} disclosures · {n_ops:,} operator(s) · date range: {date_range}",
+        s["body"],
+    ))
+
+    headers = ["Date", "Operator", "API Number", "Well Name", "Water Vol (gal)"]
+    cw = [0.75 * inch, 1.85 * inch, 1.05 * inch, 1.85 * inch, 1.0 * inch]
+
+    df = well_gb.copy()
+    if "date" in df.columns:
+        df["_date_str"] = pd.to_datetime(df["date"], errors="coerce").dt.strftime("%Y-%m-%d")
+    else:
+        df["_date_str"] = ""
+
+    rows = [[Paragraph(h, s["th"]) for h in headers]]
+    for _, row in df.iterrows():
+        op = str(row.get("OperatorName", ""))[:35]
+        api = str(row.get("APINumber", ""))
+        well = str(row.get("WellName", ""))[:35]
+        vol = row.get("TotalBaseWaterVolume")
+        vol_str = f"{vol:,.0f}" if pd.notna(vol) and vol > 0 else ""
+        rows.append([
+            Paragraph(str(row.get("_date_str", ""))[:10], s["td_c"]),
+            Paragraph(op, s["td"]),
+            Paragraph(api, s["td_c"]),
+            Paragraph(well, s["td"]),
+            Paragraph(vol_str, s["td_r"]),
+        ])
+
+    t = Table(rows, colWidths=cw, repeatRows=1)
+    t.setStyle(TableStyle(_TABLE_BASE + _alt_rows(len(rows))))
+    story.append(t)
+    story.append(PageBreak())
+
+
+def _water_section(story, s, well_gb):
+    story.append(Paragraph("Water Use", s["section"]))
+
+    wv_col = "TotalBaseWaterVolume"
+    if wv_col not in well_gb.columns or "date" not in well_gb.columns:
+        story.append(Paragraph("Water volume data not available.", s["body"]))
+        return
+
+    wv = well_gb.dropna(subset=[wv_col, "date"]).copy()
+    wv["date"] = pd.to_datetime(wv["date"])
+    wv["year"] = wv["date"].dt.year
+    wv = wv[wv[wv_col] > 0]
+
+    if wv.empty:
+        story.append(Paragraph("No water volume records with positive values.", s["body"]))
+        return
+
+    total = wv[wv_col].sum()
+    median = wv[wv_col].median()
+    story.append(Paragraph(
+        f"{len(wv):,} events with reported volume · "
+        f"total {total / 1e6:.1f} M gal · median {median / 1e3:.0f} K gal/event",
+        s["body"],
+    ))
+
+    fmt = mticker.FuncFormatter(lambda x, _: f"{x/1e6:.1f}M" if x >= 1e6 else f"{x/1e3:.0f}K")
+    fig, (ax_s, ax_b) = plt.subplots(1, 2, figsize=(9, 3.5))
+
+    ax_s.scatter(wv["date"], wv[wv_col], alpha=0.45, s=10,
+                 color="#2980b9", linewidths=0)
+    ax_s.set_ylabel("Water volume (gal)")
+    ax_s.set_title("Volume per event")
+    ax_s.yaxis.set_major_formatter(fmt)
+    ax_s.grid(axis="y", linewidth=0.4, alpha=0.6)
+
+    yr_med = wv.groupby("year")[wv_col].median().reset_index()
+    ax_b.bar(yr_med["year"], yr_med[wv_col], color="#2980b9", alpha=0.8, width=0.7)
+    ax_b.set_ylabel("Median volume (gal)")
+    ax_b.set_title("Median per year")
+    ax_b.yaxis.set_major_formatter(fmt)
+    ax_b.set_xticks(yr_med["year"])
+    ax_b.set_xticklabels(yr_med["year"].astype(int), rotation=45, ha="right")
+    ax_b.grid(axis="y", linewidth=0.4, alpha=0.6)
+
+    fig.tight_layout()
+    story.append(_fig_to_rl_image(fig, width_in=6.5))
+    story.append(PageBreak())
+
+
+def _chemical_section(story, s, ws_chem):
+    chem = ws_chem[~ws_chem["bgCAS"].isin(_EXCLUDE_CAS | {"proprietary"})].copy()
+
+    story.append(Paragraph("Chemical Summary", s["section"]))
+    if chem.empty:
+        story.append(Paragraph("No chemical data available.", s["body"]))
+        return
+
+    agg = (
+        chem.groupby("bgCAS", as_index=False)
+        .agg(
+            Name=("epa_pref_name", "first"),
+            total_records=("mass", "size"),
+            records_with_mass=("mass", lambda x: (x > 0).sum()),
+            total_mass=("mass", lambda x: x.sum(min_count=1)),
+        )
+        .sort_values("total_mass", ascending=False, na_position="last")
+        .reset_index(drop=True)
+    )
+
+    story.append(Paragraph(
+        f"{len(agg):,} identified chemicals, sorted by total disclosed mass (descending). "
+        "Water and pseudo-CAS identifiers excluded.",
+        s["body"],
+    ))
+
+    # Identify active hazard flag columns
+    hazard_candidates = [c for c in chem.columns if c.startswith("is_on_")]
+    active_flags = []
+    for col in hazard_candidates:
+        try:
+            if chem[col].astype(bool).any():
+                active_flags.append(col)
+        except Exception:
+            pass
+    active_flags = active_flags[:5]  # cap at 5 columns
+
+    abbrevs = [c.replace("is_on_", "").replace("_list", "").upper()[:6] for c in active_flags]
+
+    headers = ["CASRN", "Name", "Records\ntotal|w/mass", "Total Mass\n(lbs)"] + abbrevs
+    cw = [0.9 * inch, 2.3 * inch, 0.85 * inch, 0.85 * inch] + [0.5 * inch] * len(active_flags)
+
+    rows = [[Paragraph(h, s["th"]) for h in headers]]
+
+    # Pre-compute flag values per CAS for efficiency
+    flag_by_cas = {}
+    if active_flags:
+        for flag_col in active_flags:
+            flag_by_cas[flag_col] = chem.groupby("bgCAS")[flag_col].any().to_dict()
+
+    for _, row in agg.iterrows():
+        cas = str(row["bgCAS"])
+        name_str = str(row["Name"])[:55] if pd.notna(row["Name"]) else cas
+        rec_str = f"{int(row['total_records'])} | {int(row['records_with_mass'])}"
+        mass_val = row["total_mass"]
+        mass_str = f"{mass_val:,.1f}" if pd.notna(mass_val) else "—"
+
+        cells = [
+            Paragraph(cas, s["td_c"]),
+            Paragraph(name_str, s["td"]),
+            Paragraph(rec_str, s["td_c"]),
+            Paragraph(mass_str, s["td_r"]),
+        ]
+        for flag_col in active_flags:
+            flagged = flag_by_cas.get(flag_col, {}).get(cas, False)
+            cells.append(Paragraph("Y" if flagged else "", s["td_c"]))
+
+        rows.append(cells)
+
+    t = Table(rows, colWidths=cw, repeatRows=1)
+    t.setStyle(TableStyle(_TABLE_BASE + _alt_rows(len(rows))))
+    story.append(t)
+
+
+def _trade_secrets_section(story, s, ws_chem):
+    prop = ws_chem[ws_chem["bgCAS"] == "proprietary"].copy()
+    if prop.empty:
+        return
+
+    story.append(PageBreak())
+    story.append(Paragraph("Trade Secrets (Proprietary Ingredients)", s["section"]))
+
+    agg = (
+        prop.groupby("IngredientName", as_index=False)
+        .agg(
+            total_records=("mass", "size"),
+            records_with_mass=("mass", lambda x: (x > 0).sum()),
+            total_mass=("mass", lambda x: x.sum(min_count=1)),
+        )
+        .sort_values("total_mass", ascending=False, na_position="last")
+        .reset_index(drop=True)
+    )
+
+    n_prop = agg["IngredientName"].nunique()
+    story.append(Paragraph(
+        f"{n_prop:,} distinct trade-secret ingredient names",
+        s["body"],
+    ))
+
+    headers = ["Supplied Trade Secret Name", "Records\ntotal|w/mass", "Total Mass\n(lbs)"]
+    cw = [3.6 * inch, 1.0 * inch, 0.9 * inch]
+
+    rows = [[Paragraph(h, s["th"]) for h in headers]]
+    for _, row in agg.iterrows():
+        ing = str(row["IngredientName"])[:65] if pd.notna(row["IngredientName"]) else "—"
+        rec_str = f"{int(row['total_records'])} | {int(row['records_with_mass'])}"
+        mass_val = row["total_mass"]
+        mass_str = f"{mass_val:,.1f}" if pd.notna(mass_val) else "—"
+        rows.append([
+            Paragraph(ing, s["td"]),
+            Paragraph(rec_str, s["td_c"]),
+            Paragraph(mass_str, s["td_r"]),
+        ])
+
+    t = Table(rows, colWidths=cw, repeatRows=1)
+    t.setStyle(TableStyle(_TABLE_BASE + _alt_rows(len(rows))))
+    story.append(t)
+
+
+# ============================================================
+# Main builder
+# ============================================================
+
+def _build_pdf(well_gb, ws_chem, name, huc_scale, lat, lon) -> bytes:
+    buf = io.BytesIO()
+    s = _styles()
+
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=letter,
+        leftMargin=0.75 * inch,
+        rightMargin=0.75 * inch,
+        topMargin=0.75 * inch,
+        bottomMargin=0.75 * inch,
+        title=f"Watershed Report: {name}",
+        author="Pennsylvania Watershed Chemical Explorer",
+    )
+
+    story = []
+    _cover_page(story, s, well_gb, ws_chem, name, huc_scale, lat, lon)
+    _disclosures_section(story, s, well_gb)
+    _water_section(story, s, well_gb)
+    _chemical_section(story, s, ws_chem)
+    _trade_secrets_section(story, s, ws_chem)
+
+    doc.build(story)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+# ============================================================
+# Streamlit UI
+# ============================================================
 
 if st.button("Generate PDF Report", type="primary"):
-    with st.spinner("Building report..."):
-        # Chemical summary
-        chem_obj = ChemListSummary(ws_chem, summarize_by_chem=True,
-                                   ignore_duplicates=True, use_remote=True)
-        chem_table = chem_obj.get_display_table(colset="pdf_report1")
-
-        # Water-use chart — save to a temp file for reportlab
-        with tempfile.TemporaryDirectory() as tmpdir:
-            water_img_path = os.path.join(tmpdir, "water_use.png")
-
-            fig, ax = plt.subplots(figsize=(8, 3))
-            ax.plot(well_gb["date"], well_gb["TotalBaseWaterVolume"],
-                    "o", alpha=0.7, markersize=5)
-            ax.set_title("Water Volume (gal) per Fracking Event")
-            ax.set_ylabel("Gallons")
-            ax.yaxis.set_major_formatter(
-                plt.matplotlib.ticker.StrMethodFormatter("{x:,.0f}")
-            )
-            fig.tight_layout()
-            fig.savefig(water_img_path, dpi=120)
-            plt.close(fig)
-
-            # Build PDF to a temp file then read into bytes
-            pdf_path = os.path.join(tmpdir, "report.pdf")
-            report_meta = {
-                "Watershed Name": name,
-                "HUC Scale": huc_scale,
-                "Target Latitude": lat,
-                "Target Longitude": lon,
-                "Disclosures": len(well_gb),
-                "Unique Chemicals": ws_chem["bgCAS"].nunique(),
-            }
-
-            report = PDFReport(pdf_path)
-            report.build_title_page(
-                report_name=f"Watershed Report: {name}",
-                intro_paragraph=(
-                    "This report summarizes chemicals disclosed in FracFocus for "
-                    "fracking wells within the selected USGS watershed. "
-                    "Generated by the Open-FF Watershed Chemical Explorer."
-                ),
-                meta_info=report_meta,
-            )
-            report.build_well_list(
-                well_gb[["date", "OperatorName", "APINumber",
-                         "WellName", "TotalBaseWaterVolume"]]
-            )
-            report.build_water_graphic(water_img_path)
-            report.build_chemical_summary(chem_table)
-            report.generate()
-
-            with open(pdf_path, "rb") as f_pdf:
-                pdf_bytes = f_pdf.read()
+    with st.spinner("Building report…"):
+        try:
+            pdf_bytes = _build_pdf(well_gb, ws_chem, name, huc_scale, lat, lon)
+        except Exception as exc:
+            st.error(f"PDF generation failed: {exc}")
+            raise
 
     safe_name = name.replace(" ", "_").replace("/", "-")[:50]
     st.download_button(
@@ -114,4 +480,4 @@ if st.button("Generate PDF Report", type="primary"):
         file_name=f"watershed_report_{safe_name}.pdf",
         mime="application/pdf",
     )
-    st.success("Report ready — click above to download.")
+    st.success("Report ready — click Download PDF above.")
