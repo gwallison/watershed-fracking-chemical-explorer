@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
-from utils import load_well_index, render_sidebar, get_filtered_data, render_filter_summary
+from utils import load_well_index, render_sidebar, get_filtered_data, render_filter_summary, load_ghs_lookup
 
 st.set_page_config(page_title="Chemical Summary", layout="wide")
 
@@ -117,8 +117,11 @@ chem_table["Link"] = chem_table["CASRN"].apply(
     else f"https://storage.googleapis.com/open-ff-chem-profiles/chemicals/{cas}.html"
 )
 
+ghs_lookup = load_ghs_lookup()
+chem_table["GHS Hazards"] = chem_table["CASRN"].map(ghs_lookup).fillna("")
+
 chem_table = chem_table[
-    ["CASRN", "Name", "Records (total | w/mass)", "Total Mass (pounds)", "Mass by Year", "Link"]
+    ["CASRN", "Name", "GHS Hazards", "Records (total | w/mass)", "Total Mass (pounds)", "Mass by Year", "Link"]
 ]
 
 # ---------------------------------------------------------------------------
@@ -130,6 +133,7 @@ st.dataframe(
     hide_index=True,
     column_config={
         "Name": st.column_config.TextColumn(width="large"),
+        "GHS Hazards": st.column_config.TextColumn("GHS Hazards", width="medium"),
         "Total Mass (pounds)": st.column_config.NumberColumn(format="%,.1f"),
         "Mass by Year": st.column_config.ImageColumn(
             f"Mass by Year ({yr_min}–{yr_max})", width="medium"

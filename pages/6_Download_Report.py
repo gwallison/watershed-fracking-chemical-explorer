@@ -36,7 +36,7 @@ from reportlab.platypus.flowables import Flowable
 
 _ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets")
 
-from utils import load_well_index, render_sidebar, get_filtered_data, render_filter_summary
+from utils import load_well_index, render_sidebar, get_filtered_data, render_filter_summary, load_ghs_lookup
 
 st.set_page_config(page_title="Download Report", layout="wide")
 
@@ -72,6 +72,7 @@ _ROW_ALT = colors.HexColor("#eaf4fb")
 _GRID_LINE = colors.HexColor("#cccccc")
 
 _EXCLUDE_CAS = {"non_chem_record", "ambiguousID", "conflictingID", "sysAppMeta"}
+_CHEM_PROFILE_BASE = "https://storage.googleapis.com/open-ff-chem-profiles/chemicals"
 
 # ============================================================
 # Clickable image flowable
@@ -259,6 +260,53 @@ def _watershed_map_image(watershed_gdf, lat: float, lon: float,
         return None
 
 
+def _wells_map_image(well_gb: pd.DataFrame, watershed_gdf, lat: float, lon: float,
+                     width_in: float = 6.0):
+    """
+    Render well locations as scatter dots on the watershed basemap.
+    Returns a reportlab Image, or None on failure.
+    """
+    try:
+        import contextily as ctx
+        import geopandas as gpd
+        from shapely.geometry import Point
+
+        wm = watershed_gdf.to_crs(epsg=3857)
+        bounds = wm.total_bounds
+        pad_x = (bounds[2] - bounds[0]) * 0.08
+        pad_y = (bounds[3] - bounds[1]) * 0.08
+
+        fig, ax = plt.subplots(figsize=(7, 3.5))
+
+        wm.plot(ax=ax, facecolor="#d6eaf8", edgecolor="#1a5276",
+                linewidth=2, alpha=0.55, zorder=2)
+
+        if (not well_gb.empty
+                and "bgLatitude" in well_gb.columns
+                and "bgLongitude" in well_gb.columns):
+            wells_gdf = gpd.GeoDataFrame(
+                well_gb,
+                geometry=gpd.points_from_xy(well_gb["bgLongitude"], well_gb["bgLatitude"]),
+                crs="EPSG:4326",
+            ).to_crs(3857)
+            wells_gdf.plot(ax=ax, color="#e67e22", markersize=18,
+                           marker="o", alpha=0.65, zorder=4)
+
+        pt = gpd.GeoDataFrame(geometry=[Point(lon, lat)], crs="EPSG:4326").to_crs(3857)
+        pt.plot(ax=ax, color="#e74c3c", markersize=80, marker="*", zorder=5)
+
+        ctx.add_basemap(ax, source=ctx.providers.OpenStreetMap.Mapnik, zoom="auto")
+        ax.set_xlim(bounds[0] - pad_x, bounds[2] + pad_x)
+        ax.set_ylim(bounds[1] - pad_y, bounds[3] + pad_y)
+        ax.set_axis_off()
+        fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
+
+        return _fig_to_rl_image(fig, width_in=width_in)
+    except Exception:
+        plt.close("all")
+        return None
+
+
 # ============================================================
 # Section builders
 # ============================================================
@@ -350,7 +398,7 @@ def _cover_page(story, s, well_gb, ws_chem, name, huc_scale, lat, lon, watershed
     story.append(PageBreak())
 
 
-def _disclosures_section(story, s, well_gb):
+def _disclosures_section(story, s, well_gb, watershed_gdf=None, lat=None, lon=None):
     dates = pd.to_datetime(well_gb.get("date", pd.Series(dtype="object")), errors="coerce")
     date_range = (f"{int(dates.min().year)}–{int(dates.max().year)}"
                   if dates.notna().any() else "—")
@@ -361,6 +409,13 @@ def _disclosures_section(story, s, well_gb):
         f"{len(well_gb):,} disclosures · {n_ops:,} operator(s) · date range: {date_range}",
         s["body"],
     ))
+
+    if watershed_gdf is not None and lat is not None and lon is not None:
+        wells_img = _wells_map_image(well_gb, watershed_gdf, lat, lon)
+        if wells_img:
+            story.append(Spacer(1, 0.08 * inch))
+            story.append(wells_img)
+            story.append(Spacer(1, 0.1 * inch))
 
     headers = ["Date", "Operator", "API Number", "Well Name", "Water Vol (gal)"]
     cw = [0.75 * inch, 1.85 * inch, 1.05 * inch, 1.85 * inch, 1.0 * inch]
@@ -378,10 +433,11 @@ def _disclosures_section(story, s, well_gb):
         well = str(row.get("WellName", ""))[:35]
         vol = row.get("TotalBaseWaterVolume")
         vol_str = f"{vol:,.0f}" if pd.notna(vol) and vol > 0 else ""
+        ff_url = f"https://www.fracfocus.org/wells/{api}"
         rows.append([
             Paragraph(str(row.get("_date_str", ""))[:10], s["td_c"]),
             Paragraph(op, s["td"]),
-            Paragraph(api, s["td_c"]),
+            Paragraph(f'<a href="{ff_url}" color="blue"><u>{api}</u></a>', s["td_c"]),
             Paragraph(well, s["td"]),
             Paragraph(vol_str, s["td_r"]),
         ])
@@ -441,7 +497,7 @@ def _water_section(story, s, well_gb):
     story.append(PageBreak())
 
 
-def _chemical_section(story, s, ws_chem):
+def _chemical_section(story, s, ws_chem, ghs_lookup=None):
     chem = ws_chem[~ws_chem["bgCAS"].isin(_EXCLUDE_CAS | {"proprietary"})].copy()
 
     story.append(Paragraph("Chemical Summary", s["section"]))
@@ -467,29 +523,18 @@ def _chemical_section(story, s, ws_chem):
         s["body"],
     ))
 
-    # Identify active hazard flag columns
-    hazard_candidates = [c for c in chem.columns if c.startswith("is_on_")]
-    active_flags = []
-    for col in hazard_candidates:
-        try:
-            if chem[col].astype(bool).any():
-                active_flags.append(col)
-        except Exception:
-            pass
-    active_flags = active_flags[:5]  # cap at 5 columns
+    headers = ["CASRN", "Name", "GHS\nHazards", "Records\ntotal|w/mass",
+               "Total Mass\n(lbs)", "ChemHaz", "UVCB"]
+    cw = [0.85 * inch, 1.6 * inch, 1.5 * inch, 0.75 * inch,
+          0.75 * inch, 0.6 * inch, 0.5 * inch]
 
-    abbrevs = [c.replace("is_on_", "").replace("_list", "").upper()[:6] for c in active_flags]
+    uvcb_by_cas = {}
+    if "is_on_UVCB" in chem.columns:
+        uvcb_by_cas = chem.groupby("bgCAS")["is_on_UVCB"].any().to_dict()
 
-    headers = ["CASRN", "Name", "Records\ntotal|w/mass", "Total Mass\n(lbs)"] + abbrevs
-    cw = [0.9 * inch, 2.3 * inch, 0.85 * inch, 0.85 * inch] + [0.5 * inch] * len(active_flags)
+    _ghs = ghs_lookup or {}
 
     rows = [[Paragraph(h, s["th"]) for h in headers]]
-
-    # Pre-compute flag values per CAS for efficiency
-    flag_by_cas = {}
-    if active_flags:
-        for flag_col in active_flags:
-            flag_by_cas[flag_col] = chem.groupby("bgCAS")[flag_col].any().to_dict()
 
     for _, row in agg.iterrows():
         cas = str(row["bgCAS"])
@@ -497,18 +542,25 @@ def _chemical_section(story, s, ws_chem):
         rec_str = f"{int(row['total_records'])} | {int(row['records_with_mass'])}"
         mass_val = row["total_mass"]
         mass_str = f"{mass_val:,.1f}" if pd.notna(mass_val) else "—"
+        ghs_str = _ghs.get(cas, "")
 
-        cells = [
+        if cas != "7732-18-5":
+            chaz_url = f"{_CHEM_PROFILE_BASE}/{cas}.html"
+            chaz_cell = Paragraph(
+                f'<a href="{chaz_url}" color="blue"><u>link</u></a>', s["td_c"]
+            )
+        else:
+            chaz_cell = Paragraph("", s["td_c"])
+
+        rows.append([
             Paragraph(cas, s["td_c"]),
             Paragraph(name_str, s["td"]),
+            Paragraph(ghs_str, s["td"]),
             Paragraph(rec_str, s["td_c"]),
             Paragraph(mass_str, s["td_r"]),
-        ]
-        for flag_col in active_flags:
-            flagged = flag_by_cas.get(flag_col, {}).get(cas, False)
-            cells.append(Paragraph("Y" if flagged else "", s["td_c"]))
-
-        rows.append(cells)
+            chaz_cell,
+            Paragraph("Y" if uvcb_by_cas.get(cas, False) else "", s["td_c"]),
+        ])
 
     t = Table(rows, colWidths=cw, repeatRows=1)
     t.setStyle(TableStyle(_TABLE_BASE + _alt_rows(len(rows))))
@@ -561,10 +613,43 @@ def _trade_secrets_section(story, s, ws_chem):
 
 
 # ============================================================
+# CSV aggregate helper
+# ============================================================
+
+def _build_chem_aggregate(ws_chem: pd.DataFrame) -> pd.DataFrame:
+    """Return a per-CAS summary DataFrame suitable for CSV download."""
+    chem = ws_chem[~ws_chem["bgCAS"].isin(_EXCLUDE_CAS)].copy()
+    if chem.empty:
+        return pd.DataFrame()
+
+    hazard_cols = [c for c in chem.columns if c.startswith("is_on_")]
+
+    result = (
+        chem.groupby("bgCAS", as_index=False)
+        .agg(
+            Name=("epa_pref_name", "first"),
+            CASNumber=("CASNumber", "first"),
+            total_records=("mass", "size"),
+            records_with_mass=("mass", lambda x: (x > 0).sum()),
+            total_mass_lbs=("mass", lambda x: x.sum(min_count=1)),
+        )
+    )
+    for col in hazard_cols:
+        try:
+            flags = chem.groupby("bgCAS")[col].any()
+            result[col] = result["bgCAS"].map(flags)
+        except Exception:
+            pass
+
+    return result.sort_values("total_mass_lbs", ascending=False, na_position="last").reset_index(drop=True)
+
+
+# ============================================================
 # Main builder
 # ============================================================
 
-def _build_pdf(well_gb, ws_chem, name, huc_scale, lat, lon, watershed_gdf=None) -> bytes:
+def _build_pdf(well_gb, ws_chem, name, huc_scale, lat, lon,
+               watershed_gdf=None, ghs_lookup=None) -> bytes:
     buf = io.BytesIO()
     s = _styles()
 
@@ -581,9 +666,9 @@ def _build_pdf(well_gb, ws_chem, name, huc_scale, lat, lon, watershed_gdf=None) 
 
     story = []
     _cover_page(story, s, well_gb, ws_chem, name, huc_scale, lat, lon, watershed_gdf)
-    _disclosures_section(story, s, well_gb)
     _water_section(story, s, well_gb)
-    _chemical_section(story, s, ws_chem)
+    _disclosures_section(story, s, well_gb, watershed_gdf, lat, lon)
+    _chemical_section(story, s, ws_chem, ghs_lookup)
     _trade_secrets_section(story, s, ws_chem)
 
     doc.build(story)
@@ -595,16 +680,44 @@ def _build_pdf(well_gb, ws_chem, name, huc_scale, lat, lon, watershed_gdf=None) 
 # Streamlit UI
 # ============================================================
 
+safe_name = name.replace(" ", "_").replace("/", "-")[:50]
+
+st.subheader("Data Downloads")
+_dl_col1, _dl_col2 = st.columns(2)
+
+_wells_dl = well_gb.drop(columns=["geometry"], errors="ignore")
+_dl_col1.download_button(
+    label="Download Wells Metadata (CSV)",
+    data=_wells_dl.to_csv(index=False),
+    file_name=f"wells_{safe_name}.csv",
+    mime="text/csv",
+)
+
+_chem_agg = _build_chem_aggregate(ws_chem)
+if not _chem_agg.empty:
+    _dl_col2.download_button(
+        label="Download Chemical Summary (CSV)",
+        data=_chem_agg.to_csv(index=False),
+        file_name=f"chemicals_{safe_name}.csv",
+        mime="text/csv",
+    )
+else:
+    _dl_col2.caption("No chemical data available to download.")
+
+st.divider()
+
+_ghs_lookup = load_ghs_lookup()
+
 if st.button("Generate PDF Report", type="primary"):
     with st.spinner("Building report…"):
         watershed_gdf = st.session_state.get("containing_watershed")
         try:
-            pdf_bytes = _build_pdf(well_gb, ws_chem, name, huc_scale, lat, lon, watershed_gdf)
+            pdf_bytes = _build_pdf(well_gb, ws_chem, name, huc_scale, lat, lon,
+                                   watershed_gdf, _ghs_lookup)
         except Exception as exc:
             st.error(f"PDF generation failed: {exc}")
             raise
 
-    safe_name = name.replace(" ", "_").replace("/", "-")[:50]
     st.download_button(
         label="Download PDF",
         data=pdf_bytes,

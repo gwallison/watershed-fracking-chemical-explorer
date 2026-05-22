@@ -34,6 +34,7 @@ N_PARTITIONS = 256
 HUC_LAYER = {2: 1, 4: 2, 6: 3, 8: 4, 10: 5, 12: 6}
 
 WBD_BASE_URL = "https://storage.googleapis.com/open-ff-query-layer/v1/wbd"
+GHS_LOOKUP_URL = "https://storage.googleapis.com/open-ff-chem-profiles/ghs_lookup.parquet"
 
 # Columns to keep from disclosure partition files (tier 2)
 _DISC_COLS = [
@@ -156,6 +157,20 @@ def fetch_watershed(latitude: float, longitude: float, huc_scale: int) -> gpd.Ge
     bbox = (longitude - buffer, latitude - buffer,
             longitude + buffer, latitude + buffer)
     return gdf.cx[bbox[0]:bbox[2], bbox[1]:bbox[3]]
+
+
+@st.cache_data(show_spinner=False)
+def load_ghs_lookup() -> dict:
+    """Fetch the per-CAS GHS hazard string lookup from GCS.
+    Returns a {bgCAS: ghs_summary} dict; empty dict on any failure so pages
+    degrade gracefully when the file has not yet been uploaded."""
+    try:
+        r = requests.get(GHS_LOOKUP_URL, timeout=30)
+        r.raise_for_status()
+        df = pd.read_parquet(io.BytesIO(r.content))
+        return df.set_index('bgCAS')['ghs_summary'].to_dict()
+    except Exception:
+        return {}
 
 
 # ---------------------------------------------------------------------------
