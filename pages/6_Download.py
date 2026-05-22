@@ -1,9 +1,7 @@
 """
-Page 6 — Download Report
+Page 6 — Download
 
-Generates a professional PDF summary report for the selected watershed
-and offers it as a Streamlit download button.
-
+CSV and PDF downloads for the selected watershed.
 Built directly with reportlab — does not use the PDFReport class.
 """
 
@@ -38,12 +36,12 @@ _ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets")
 
 from utils import load_well_index, render_sidebar, get_filtered_data, render_filter_summary, load_ghs_lookup
 
-st.set_page_config(page_title="Download Report", layout="wide")
+st.set_page_config(page_title="Download", layout="wide")
 
 well_index = load_well_index()
 render_sidebar(well_index)
 
-st.title("Download Report")
+st.title("Download")
 
 if "ws_chem" not in st.session_state:
     st.info("Select a location in the sidebar and click **Find Watershed**.")
@@ -682,7 +680,26 @@ def _build_pdf(well_gb, ws_chem, name, huc_scale, lat, lon,
 
 safe_name = name.replace(" ", "_").replace("/", "-")[:50]
 
+# ── Data Downloads ───────────────────────────────────────────────────────────
 st.subheader("Data Downloads")
+st.markdown(
+    """
+Two spreadsheet files are available for the currently selected watershed.
+Both reflect any **sidebar filters** (year range, operator) you have applied.
+
+- **Wells Metadata** — one row per fracking disclosure. Includes the fracking date,
+  operator name, API number (the government-assigned well identifier), well name, and
+  total water volume reported. Use this to see who drilled where and when, or to look
+  up specific wells in databases like FracFocus.
+
+- **Chemical Summary** — one row per chemical, showing how many times it appears
+  across all disclosures in this watershed and the total mass (in pounds) reported.
+  Includes all hazard flags from the Open-FF dataset. This is the best starting point
+  if you're researching what chemicals were used and in what quantities. (Not all rows
+  have masses, because some rows in FracFocus do not reliably report quantity.)
+"""
+)
+
 _dl_col1, _dl_col2 = st.columns(2)
 
 _wells_dl = well_gb.drop(columns=["geometry"], errors="ignore")
@@ -705,6 +722,28 @@ else:
     _dl_col2.caption("No chemical data available to download.")
 
 st.divider()
+
+# ── PDF Report ───────────────────────────────────────────────────────────────
+st.subheader("PDF Report")
+st.markdown(
+    """
+The PDF is a printable, shareable summary of everything shown in this app for the
+selected watershed. It contains:
+
+1. **Cover page** — key statistics (disclosures, operators, water used, chemicals
+   identified) and a map of the watershed boundary.
+2. **Water Use** — charts showing water volume trends over time.
+3. **Fracking Disclosures** — a map of well locations and a table of every disclosure,
+   with clickable links to the original FracFocus records.
+4. **Chemical Summary** — a table of every identified chemical, with GHS hazard
+   classifications and links to detailed chemical profiles.
+5. **Trade Secrets** — a list of proprietary ingredients whose chemical identities
+   have not been publicly disclosed by the operator.
+
+**Note:** Generating the PDF can take 15–40 seconds for large watersheds. Click the
+button below, then wait for a **Download PDF** button to appear before navigating away.
+"""
+)
 
 _ghs_lookup = load_ghs_lookup()
 

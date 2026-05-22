@@ -22,6 +22,26 @@ render_sidebar(well_index)
 
 st.title("Trade Secrets")
 
+st.markdown(
+    """
+Under both FracFocus rules and Pennsylvania law, operators may withhold the chemical
+identity of an ingredient by claiming it as a **trade secret** (also called Confidential
+Business Information, or CBI). When they do, the disclosure lists only a generic or
+supplied name — no CAS registry number is provided.
+
+**What this means in practice:**
+
+- Without a CASRN, it is impossible to look up the chemical's hazard profile, regulatory
+  status, or whether it appears on any watchlist. The ingredient is effectively invisible
+  to health and environmental researchers.
+- Mass is typically still reported for trade-secret rows, so the table below shows how
+  much of each named ingredient was used — just not what it actually is.
+- The names in this table are supplied by the operator and are not standardized. The same
+  chemical may appear under different names across disclosures, so the number of distinct
+  names here is a lower bound on the number of secret ingredients actually used.
+"""
+)
+
 if "ws_chem" not in st.session_state:
     st.info("Select a location in the sidebar and click **Find Watershed**.")
     st.stop()
@@ -113,6 +133,10 @@ trade_table = (
 with st.spinner("Generating sparklines…"):
     trade_table["Mass by Year"] = trade_table["Supplied Trade Secret Name"].apply(_sparkline)
 
+st.caption(
+    "Mass by Year shows the relative amount reported each year — bar height is "
+    "proportional within each row, so use the Total Mass column for absolute amounts."
+)
 st.dataframe(
     trade_table[["Supplied Trade Secret Name", "Records (total | w/mass)",
                  "Total Mass (pounds)", "Mass by Year"]],

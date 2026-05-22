@@ -19,6 +19,25 @@ render_sidebar(well_index)
 
 st.title("Wells Map")
 
+st.markdown(
+    """
+Each marker on this map is a **fracking disclosure** — a report filed with FracFocus
+by an operator for a single well completion event. One well may appear more than once
+if it was fracked in multiple years.
+
+When many wells are close together, markers are automatically grouped into **cluster
+circles** showing a count. Zoom in or click a cluster to expand it and see the
+individual well locations. Once zoomed in enough, click any single marker to see the
+operator name, API number, and links to the original FracFocus record and the Open-FF
+disclosure page. Use the **layer selector in the upper-right corner of the map** to
+switch to a satellite basemap.
+
+The table below the map lists the same disclosures. **Has Chem Recs** indicates whether
+chemical ingredient data is available for that disclosure — many early disclosures
+(2011–2013) in FracFocus lack chemical detail in the Open-FF dataset.
+"""
+)
+
 if "well_gb" not in st.session_state:
     st.info("Select a location in the sidebar and click **Find Watershed**.")
     st.stop()

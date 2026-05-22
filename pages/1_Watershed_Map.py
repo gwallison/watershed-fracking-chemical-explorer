@@ -17,6 +17,20 @@ render_sidebar(well_index)
 
 st.title("Watershed Map")
 
+st.markdown(
+    """
+This map shows the **USGS watershed boundary** that contains the point you entered in
+the sidebar. Watersheds are natural drainage areas — all surface water within the
+boundary flows to a common outlet. The HUC scale you select controls the size of the
+unit: lower numbers (e.g. HUC6) cover larger regions, while higher numbers (e.g. HUC12)
+zoom in to smaller, more local catchments. The red marker shows your focal point.
+
+All data in the other pages of this app — wells, chemicals, water use — is drawn from
+fracking disclosures within this boundary. Use the **layer selector in the upper-right
+corner of the map** to switch to a satellite basemap.
+"""
+)
+
 if "containing_watershed" not in st.session_state:
     st.info("Select a location in the sidebar and click **Find Watershed**.")
     st.stop()

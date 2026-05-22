@@ -127,16 +127,64 @@ chem_table = chem_table[
 # ---------------------------------------------------------------------------
 # Display
 # ---------------------------------------------------------------------------
+st.markdown(
+    """
+Each row represents one chemical aggregated across **all disclosures currently selected**
+— that is, every fracking event in this watershed that falls within your chosen filters.
+The same chemical reported by different operators or in different years is combined into
+a single row.
+
+**Column guide**
+
+| Column | What it means |
+|---|---|
+| **CASRN** | CAS Registry Number — the standard unique identifier for a chemical substance, assigned by the American Chemical Society. |
+| **Name** | EPA preferred name for the chemical. |
+| **GHS Hazards** | Hazard categories flagged by the Globally Harmonized System of Classification, drawn from multiple authoritative sources (PubChem, ECHA, and others). Categories include: carcinogenic, mutagenic, reproductive hazard, inhalation hazard, and dermal hazard. A blank cell means no GHS flag was found in the Open-FF reference data — not that the chemical is safe. |
+| **Records (total \| w/mass)** | Number of disclosure records in this watershed that list this chemical, followed by the number of those records that include a reported mass. Many disclosures omit mass figures. |
+| **Total Mass (pounds)** | Sum of all reported masses across qualifying disclosures. Blank if no mass was reported for any record. |
+| **Mass by Year** | Bar chart showing relative mass reported each year (see caption below). |
+| **Hazard Info** | Link to the Open-FF chemical profile page with full hazard detail. Not available for water (7732-18-5) or proprietary entries. |
+
+**Working with the table** — Click any column header to sort. Use the search icon
+(top-right of the table) to filter rows by keyword. Drag column borders to resize.
+Click the expand icon (top-right) for a full-screen view. Use the download icon to
+save the table as a CSV.
+"""
+)
+st.markdown(
+    """
+    <style>
+    div[data-testid="stDataFrame"] .ag-header-cell-label {
+        white-space: normal !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
+        line-height: 1.3 !important;
+    }
+    div[data-testid="stDataFrame"] .ag-cell {
+        white-space: normal !important;
+        word-break: break-word !important;
+        overflow-wrap: break-word !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+st.caption(
+    "Mass by Year shows the relative amount reported each year — bar height is "
+    "proportional within each row, so use the Total Mass column for absolute amounts."
+)
 st.dataframe(
     chem_table,
     width="stretch",
     hide_index=True,
     column_config={
-        "Name": st.column_config.TextColumn(width="large"),
+        "Name": st.column_config.TextColumn(width="medium"),
         "GHS Hazards": st.column_config.TextColumn("GHS Hazards", width="medium"),
+        "Records (total | w/mass)": st.column_config.TextColumn(width="small"),
         "Total Mass (pounds)": st.column_config.NumberColumn(format="%,.1f"),
         "Mass by Year": st.column_config.ImageColumn(
-            f"Mass by Year ({yr_min}–{yr_max})", width="medium"
+            f"Mass by Year ({yr_min}–{yr_max})", width="small"
         ),
         "Link": st.column_config.LinkColumn("Link", display_text="Hazard Info"),
     },

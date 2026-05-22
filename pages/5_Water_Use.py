@@ -20,6 +20,25 @@ render_sidebar(well_index)
 
 st.title("Water Use")
 
+st.markdown(
+    """
+These charts show the volume of water used in fracking operations within the selected
+watershed, drawn from FracFocus disclosures.
+
+**Two important caveats:**
+
+- **Not all disclosures report a water volume.** The metrics and charts below include
+  only the subset of disclosures that provided a positive volume figure. The "Disclosures
+  with volume" metric shows how many records are included versus the total.
+
+- **The source of the water is often unknown.** FracFocus records a total base water
+  volume but does not consistently identify where that water came from. Some operations
+  use recycled produced water or wastewater from other wells, but this is frequently
+  not specified in the disclosure. Figures here should be understood as reported water
+  input, not necessarily freshwater withdrawal.
+"""
+)
+
 if "well_gb" not in st.session_state:
     st.info("Select a location in the sidebar and click **Find Watershed**.")
     st.stop()

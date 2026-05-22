@@ -1,7 +1,7 @@
 """
 Watershed Chemical Explorer — home page.
 
-Entry point for `streamlit run app.py`.
+Entry point for `streamlit run Chemical_explorer_tool.py`.
 Shows an interactive map for point selection before a watershed is chosen;
 shows overview metrics once a watershed is selected.
 """
@@ -31,10 +31,34 @@ render_sidebar(well_index)
 
 st.title("Pennsylvania Watershed Chemical Explorer")
 
+st.markdown(
+    """
+This tool lets you explore the chemicals reported in fracking disclosures for any
+USGS watershed in Pennsylvania. Data comes from **FracFocus** — the national fracking
+chemical registry — processed and standardized by the **Open-FF** project. Use it to
+see which chemicals were used near a location you care about, how much was reported,
+and what hazards those chemicals carry.
+"""
+)
+
 if "watershed_name" not in st.session_state:
     st.markdown(
-        "Click the map to set your focal point, choose a **HUC Scale** in the "
-        "sidebar, then click **Find Watershed**."
+        """
+### Getting started
+
+1. **Pick a location.** Click anywhere on the map below to set your focal point, or
+   type coordinates directly into the **Latitude / Longitude** fields in the sidebar.
+   The red marker shows the currently selected point.
+
+2. **Choose a HUC Scale** in the sidebar. This controls the size of the watershed unit.
+   **HUC10** is a good default — it covers a meaningful local drainage area. Lower
+   numbers (HUC6, HUC8) cover larger regions; HUC12 zooms in to smaller catchments.
+
+3. **Click Find Watershed.** The app identifies the USGS watershed boundary containing
+   your point and loads all fracking disclosures from within it.
+
+Once loaded, use the pages in the left sidebar to explore the data.
+        """
     )
 
     # --- interactive point-selection map ---
