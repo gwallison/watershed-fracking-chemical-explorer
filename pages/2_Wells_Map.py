@@ -34,7 +34,10 @@ switch to a satellite basemap.
 
 The table below the map lists the same disclosures. **Has Chem Recs** indicates whether
 chemical ingredient data is available for that disclosure — many early disclosures
-(2011–2013) in FracFocus lack chemical detail in the Open-FF dataset.
+(2011–2013) in FracFocus lack chemical detail in the Open-FF dataset. For those wells,
+the chemicals disclosed to FracFocus may still be visible by following the FracFocus link
+in the well's popup and examining the PDF file — as far as we know, that is the only
+public documentation of the chemicals used in those disclosures.
 """
 )
 
