@@ -18,6 +18,16 @@ st.set_page_config(
     layout="wide",
 )
 
+st.markdown(
+    """
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Lato:wght@400;700&display=swap');
+    html, body, [class*="css"] { font-family: 'Lato', sans-serif; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # Transfer any pending map-click coordinates into the widget keys BEFORE
 # render_sidebar instantiates the number inputs (Streamlit forbids writing to
 # a keyed widget's session state after it has rendered in the same run).

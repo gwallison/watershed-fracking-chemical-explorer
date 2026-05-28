@@ -90,7 +90,7 @@ fmt = mticker.FuncFormatter(lambda x, _: f"{x/1e6:.1f}M" if x >= 1e6 else f"{x/1
 
 # -- Scatter: volume per event over time --
 ax_scatter.scatter(wv["date"], wv["TotalBaseWaterVolume"],
-                   alpha=0.5, s=18, color="steelblue", linewidths=0)
+                   alpha=0.5, s=18, color="#0287D4", linewidths=0)
 ax_scatter.set_ylabel("Water volume (gal)")
 ax_scatter.set_title("Water volume per fracking event")
 ax_scatter.yaxis.set_major_formatter(fmt)
@@ -103,7 +103,7 @@ yr_summary = (
     .reset_index()
 )
 ax_bar.bar(yr_summary["year"], yr_summary["median"],
-           color="steelblue", alpha=0.75, width=0.7)
+           color="#0287D4", alpha=0.75, width=0.7)
 ax_bar.set_ylabel("Median volume (gal)")
 ax_bar.set_title("Median water volume per year")
 ax_bar.yaxis.set_major_formatter(fmt)

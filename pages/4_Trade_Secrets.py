@@ -96,8 +96,8 @@ year_mass = (
 def _sparkline(ingredient: str) -> str:
     vals = year_mass.loc[ingredient].values if ingredient in year_mass.index else [0] * len(all_years)
     fig, ax = plt.subplots(figsize=(2, 0.8))
-    ax.bar(range(len(vals)), vals, width=0.85, color="steelblue", linewidth=0)
-    ax.set_facecolor("#b8b8b8")
+    ax.bar(range(len(vals)), vals, width=0.85, color="#0287D4", linewidth=0)
+    ax.set_facecolor("#BFE4F6")
     fig.patch.set_facecolor("none")
     ax.set_xlim(-0.6, len(all_years) - 0.4)
     ax.set_xticks([])

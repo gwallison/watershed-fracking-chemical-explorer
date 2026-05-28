@@ -70,12 +70,12 @@ def _sparkline(cas: str) -> str:
     vals = year_mass.loc[cas].values if cas in year_mass.index else [0] * len(all_years)
     fig, ax = plt.subplots(figsize=(2, 0.8))
 
-    ax.bar(range(len(vals)), vals, width=0.85, color="steelblue", linewidth=0)
+    ax.bar(range(len(vals)), vals, width=0.85, color="#0287D4", linewidth=0)
 
     # Grey background defines the plot area edges; figure patch is transparent
     # so the cell background shows through outside the axes.
     # NOTE: do NOT pass transparent=True to savefig — it overrides ax.facecolor.
-    ax.set_facecolor("#b8b8b8")
+    ax.set_facecolor("#BFE4F6")
     fig.patch.set_facecolor("none")
 
     ax.set_xlim(-0.6, len(all_years) - 0.4)

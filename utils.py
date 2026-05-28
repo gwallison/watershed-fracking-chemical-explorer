@@ -16,6 +16,7 @@ Data access strategy (two phases):
 
 import hashlib
 import io
+import os
 from concurrent.futures import ThreadPoolExecutor
 
 import geopandas as gpd
@@ -268,6 +269,9 @@ def render_sidebar(well_index: pd.DataFrame):
         st.session_state["sidebar_lon"] = -79.5569
 
     with st.sidebar:
+        _logo_path = os.path.join(os.path.dirname(__file__), "assets", "FracTracker_logo.png")
+        st.image(_logo_path, use_container_width=True)
+        st.divider()
         st.header("Search")
         st.caption("Or click the map on the home page to set coordinates.")
         lat = st.number_input(
@@ -300,7 +304,7 @@ def render_sidebar(well_index: pd.DataFrame):
                     "_last_map_click",
                 ]:
                     st.session_state.pop(key, None)
-                st.rerun()
+                st.switch_page("Chemical_explorer_tool.py")
             well_gb_raw = st.session_state.get("well_gb", pd.DataFrame())
             ws_chem_raw = st.session_state.get("ws_chem", pd.DataFrame())
             n_chem = ws_chem_raw["bgCAS"].nunique() if not ws_chem_raw.empty else 0
@@ -356,6 +360,33 @@ def render_sidebar(well_index: pd.DataFrame):
                         op_options,
                         index=op_options.index(cur_op),
                     )
+
+    st.markdown(
+        """
+        <style>
+        .ft-footer {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background-color: #FDFFFC;
+            border-top: 1px solid #BFE4F6;
+            padding: 5px 16px;
+            font-size: 12px;
+            color: #025687;
+            text-align: center;
+            z-index: 999;
+        }
+        .ft-footer a { color: #0287D4; text-decoration: none; }
+        .ft-footer a:hover { text-decoration: underline; }
+        </style>
+        <div class="ft-footer">
+            A <a href="https://fractracker.org" target="_blank">FracTracker Alliance</a>
+            tool &nbsp;|&nbsp; fractracker.org
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     if find_btn:
         with st.spinner("Finding watershed and wells..."):
