@@ -37,6 +37,11 @@ HUC_LAYER = {2: 1, 4: 2, 6: 3, 8: 4, 10: 5, 12: 6}
 WBD_BASE_URL = "https://storage.googleapis.com/open-ff-query-layer/v1/wbd"
 GHS_LOOKUP_URL = "https://storage.googleapis.com/open-ff-chem-profiles/ghs_lookup.parquet"
 
+NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+NOMINATIM_USER_AGENT = "watershed-chemical-explorer (FracTracker Alliance; contact: gary.allison@gmail.com)"
+# Pennsylvania bounding box: west, south, east, north
+PA_BBOX = (-80.519, 39.719, -74.689, 42.269)
+
 # Columns to keep from disclosure partition files (tier 2)
 _DISC_COLS = [
     "DisclosureId", "APINumber", "api10", "OperatorName", "WellName",
@@ -174,6 +179,43 @@ def load_ghs_lookup() -> dict:
         return {}
 
 
+@st.cache_data(show_spinner=False)
+def geocode_pa_location(query: str) -> list:
+    """
+    Geocode a free-text place name or address to candidate Pennsylvania
+    locations using the Nominatim (OpenStreetMap) search API, restricted to
+    a PA bounding box. Returns a list of {"label", "lat", "lon"} dicts,
+    best match first. Empty list on no match or request failure.
+    """
+    query = query.strip()
+    if not query:
+        return []
+    west, south, east, north = PA_BBOX
+    params = {
+        "q": query,
+        "format": "json",
+        "limit": 5,
+        "countrycodes": "us",
+        "viewbox": f"{west},{north},{east},{south}",
+        "bounded": 1,
+    }
+    headers = {"User-Agent": NOMINATIM_USER_AGENT}
+    try:
+        r = requests.get(NOMINATIM_URL, params=params, headers=headers, timeout=10)
+        r.raise_for_status()
+        results = r.json()
+    except Exception:
+        return []
+    return [
+        {
+            "label": item.get("display_name", query),
+            "lat": float(item["lat"]),
+            "lon": float(item["lon"]),
+        }
+        for item in results
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Watershed search — updates session state
 # ---------------------------------------------------------------------------
@@ -301,7 +343,7 @@ def render_sidebar(well_index: pd.DataFrame):
                     "search_lat", "search_lon",
                     "ws_disc", "well_gb", "ws_chem",
                     "filter_year_range", "filter_operator", "_filter_watershed",
-                    "_last_map_click",
+                    "_last_map_click", "_search_matches",
                 ]:
                     st.session_state.pop(key, None)
                 st.switch_page("Chemical_explorer_tool.py")

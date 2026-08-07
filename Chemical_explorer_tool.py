@@ -11,7 +11,7 @@ import streamlit as st
 import pandas as pd
 from streamlit_folium import st_folium
 
-from utils import load_well_index, render_sidebar, get_filtered_data
+from utils import load_well_index, render_sidebar, get_filtered_data, geocode_pa_location
 
 st.set_page_config(
     page_title="Watershed Chemical Explorer",
@@ -56,9 +56,10 @@ if "watershed_name" not in st.session_state:
         """
 ### Getting started
 
-1. **Pick a location.** Click anywhere on the map below to set your focal point, or
-   type coordinates directly into the **Latitude / Longitude** fields in the sidebar.
-   The red marker shows the currently selected point.
+1. **Pick a location.** Search for a PA town, county, or address below, click
+   anywhere on the map, or type coordinates directly into the
+   **Latitude / Longitude** fields in the sidebar. The red marker shows the
+   currently selected point.
 
 2. **Choose a HUC Scale** in the sidebar. This controls the size of the watershed unit.
    **HUC10** is a good default — it covers a meaningful local drainage area. Lower
@@ -70,6 +71,45 @@ if "watershed_name" not in st.session_state:
 Once loaded, use the pages in the left sidebar to explore the data.
         """
     )
+
+    # --- location search ---
+    with st.form("location_search_form", clear_on_submit=False):
+        search_col, btn_col = st.columns([5, 1])
+        search_query = search_col.text_input(
+            "Search for a PA location",
+            placeholder="e.g. Washington, PA or 123 Main St, Erie, PA",
+            label_visibility="collapsed",
+        )
+        search_clicked = btn_col.form_submit_button("Search", use_container_width=True)
+
+    if search_clicked:
+        if search_query.strip():
+            with st.spinner("Searching..."):
+                matches = geocode_pa_location(search_query)
+            if not matches:
+                st.warning(
+                    "No match found in Pennsylvania. Try a different spelling "
+                    "or add more detail (e.g. county)."
+                )
+                st.session_state.pop("_search_matches", None)
+            elif len(matches) == 1:
+                st.session_state["_pending_lat"] = round(matches[0]["lat"], 6)
+                st.session_state["_pending_lon"] = round(matches[0]["lon"], 6)
+                st.session_state.pop("_search_matches", None)
+                st.rerun()
+            else:
+                st.session_state["_search_matches"] = matches
+
+    if "_search_matches" in st.session_state:
+        matches = st.session_state["_search_matches"]
+        options = [m["label"] for m in matches]
+        choice = st.selectbox("Multiple matches found — pick one:", options)
+        if st.button("Use this location"):
+            picked = matches[options.index(choice)]
+            st.session_state["_pending_lat"] = round(picked["lat"], 6)
+            st.session_state["_pending_lon"] = round(picked["lon"], 6)
+            st.session_state.pop("_search_matches", None)
+            st.rerun()
 
     # --- interactive point-selection map ---
     cur_lat = st.session_state.get("sidebar_lat", 40.4892)
