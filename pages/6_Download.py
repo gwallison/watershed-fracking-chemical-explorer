@@ -216,15 +216,24 @@ def _fig_to_rl_image(fig, width_in: float = 6.5) -> Image:
 # Watershed map image
 # ============================================================
 
+# tile.openstreetmap.org returns a 403 "Access blocked" image to scripted clients
+# (OSM tile usage policy), so the PDF maps use a provider that allows this use.
+# Alternatives that worked without a key: Esri.WorldStreetMap, USGS.USTopo.
+# CartoDB tiles now require an API key.
+def _add_basemap(ax):
+    import contextily as ctx
+    ctx.add_basemap(ax, source=ctx.providers.Esri.WorldTopoMap, zoom="auto",
+                    attribution_size=5)
+
+
 def _watershed_map_image(watershed_gdf, lat: float, lon: float,
                          width_in: float = 6.0):
     """
-    Render the watershed boundary + focal-point marker onto an OSM basemap
+    Render the watershed boundary + focal-point marker onto a basemap
     and return a reportlab Image.  Returns None on any failure so the cover
     page degrades gracefully if tiles can't be fetched.
     """
     try:
-        import contextily as ctx
         import geopandas as gpd
         from shapely.geometry import Point
 
@@ -243,8 +252,7 @@ def _watershed_map_image(watershed_gdf, lat: float, lon: float,
         pt = gpd.GeoDataFrame(geometry=[Point(lon, lat)], crs="EPSG:4326").to_crs(3857)
         pt.plot(ax=ax, color="#e74c3c", markersize=100, marker="*", zorder=5)
 
-        # OSM basemap
-        ctx.add_basemap(ax, source=ctx.providers.OpenStreetMap.Mapnik, zoom="auto")
+        _add_basemap(ax)
 
         ax.set_xlim(bounds[0] - pad_x, bounds[2] + pad_x)
         ax.set_ylim(bounds[1] - pad_y, bounds[3] + pad_y)
@@ -265,7 +273,6 @@ def _wells_map_image(well_gb: pd.DataFrame, watershed_gdf, lat: float, lon: floa
     Returns a reportlab Image, or None on failure.
     """
     try:
-        import contextily as ctx
         import geopandas as gpd
         from shapely.geometry import Point
 
@@ -293,7 +300,7 @@ def _wells_map_image(well_gb: pd.DataFrame, watershed_gdf, lat: float, lon: floa
         pt = gpd.GeoDataFrame(geometry=[Point(lon, lat)], crs="EPSG:4326").to_crs(3857)
         pt.plot(ax=ax, color="#e74c3c", markersize=80, marker="*", zorder=5)
 
-        ctx.add_basemap(ax, source=ctx.providers.OpenStreetMap.Mapnik, zoom="auto")
+        _add_basemap(ax)
         ax.set_xlim(bounds[0] - pad_x, bounds[2] + pad_x)
         ax.set_ylim(bounds[1] - pad_y, bounds[3] + pad_y)
         ax.set_axis_off()
