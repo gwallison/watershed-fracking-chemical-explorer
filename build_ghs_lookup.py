@@ -15,8 +15,10 @@ Then upload the output to GCS:
 
 import pandas as pd
 
+# Source: chem_haz_agg project (moved from integrated/chem_profiles). Its Tier 1 definition
+# is intentional: the lookup follows it (e.g. skin/eye irritants H315/H317/H319 are Tier 1).
 TIER1_EVIDENCE_PARQUET = (
-    r"C:\MyDocs\integrated\chem_profiles\data\03_processed\master_evidence_log.parquet"
+    r"C:\MyDocs\sandbox\chem_haz_agg\data\03_processed\master_evidence_log.parquet"
 )
 
 GHS_SOURCES = ['PubChem', 'Australia', 'ChemInformatics', 'ECHA Harmonized', 'Japan']
