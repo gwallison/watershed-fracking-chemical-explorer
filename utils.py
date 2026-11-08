@@ -35,6 +35,9 @@ N_PARTITIONS = 256
 HUC_LAYER = {2: 1, 4: 2, 6: 3, 8: 4, 10: 5, 12: 6}
 
 WBD_BASE_URL = "https://storage.googleapis.com/open-ff-query-layer/v1/wbd"
+# CAS values that must never show GHS hazards even if present in the lookup:
+# water, and Open-FF's placeholder for trade-secret (undisclosed) ingredients.
+GHS_EXCLUDED_CAS = {"7732-18-5", "proprietary"}
 GHS_LOOKUP_URL = "https://storage.googleapis.com/open-ff-chem-profiles/ghs_lookup.parquet"
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
@@ -175,6 +178,7 @@ def load_ghs_lookup() -> dict:
         r = requests.get(GHS_LOOKUP_URL, timeout=30)
         r.raise_for_status()
         df = pd.read_parquet(io.BytesIO(r.content))
+        df = df[~df['bgCAS'].isin(GHS_EXCLUDED_CAS)]
         return df.set_index('bgCAS')['ghs_summary'].to_dict()
     except Exception:
         return {}
