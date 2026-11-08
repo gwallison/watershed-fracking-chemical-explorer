@@ -85,8 +85,15 @@ Once loaded, use the pages in the left sidebar to explore the data.
     if search_clicked:
         if search_query.strip():
             with st.spinner("Searching..."):
-                matches = geocode_pa_location(search_query)
-            if not matches:
+                matches, geo_error = geocode_pa_location(search_query)
+            if geo_error:
+                st.error(
+                    "The location search service could not be reached, so this search "
+                    "did not run. Please try again, or click the map / enter "
+                    f"coordinates instead.  (Details: {geo_error})"
+                )
+                st.session_state.pop("_search_matches", None)
+            elif not matches:
                 st.warning(
                     "No match found in Pennsylvania. Try a different spelling "
                     "or add more detail (e.g. county)."

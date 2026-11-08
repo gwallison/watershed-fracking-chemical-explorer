@@ -180,16 +180,9 @@ def load_ghs_lookup() -> dict:
 
 
 @st.cache_data(show_spinner=False)
-def geocode_pa_location(query: str) -> list:
-    """
-    Geocode a free-text place name or address to candidate Pennsylvania
-    locations using the Nominatim (OpenStreetMap) search API, restricted to
-    a PA bounding box. Returns a list of {"label", "lat", "lon"} dicts,
-    best match first. Empty list on no match or request failure.
-    """
-    query = query.strip()
-    if not query:
-        return []
+def _geocode_nominatim(query: str) -> list:
+    """Raw Nominatim call. Raises on any HTTP/network error so that failures
+    are NOT cached by st.cache_data (only successful responses are)."""
     west, south, east, north = PA_BBOX
     params = {
         "q": query,
@@ -200,20 +193,35 @@ def geocode_pa_location(query: str) -> list:
         "bounded": 1,
     }
     headers = {"User-Agent": NOMINATIM_USER_AGENT}
-    try:
-        r = requests.get(NOMINATIM_URL, params=params, headers=headers, timeout=10)
-        r.raise_for_status()
-        results = r.json()
-    except Exception:
-        return []
+    r = requests.get(NOMINATIM_URL, params=params, headers=headers, timeout=10)
+    r.raise_for_status()
     return [
         {
             "label": item.get("display_name", query),
             "lat": float(item["lat"]),
             "lon": float(item["lon"]),
         }
-        for item in results
+        for item in r.json()
     ]
+
+
+def geocode_pa_location(query: str):
+    """
+    Geocode a free-text place name or address to candidate Pennsylvania
+    locations (Nominatim / OpenStreetMap, restricted to a PA bounding box).
+
+    Returns (matches, error): matches is a list of {"label", "lat", "lon"}
+    dicts, best match first (empty if nothing found); error is None on success
+    or a short message if the geocoding service could not be reached, so the
+    UI can distinguish "no match" from "service unavailable".
+    """
+    query = query.strip()
+    if not query:
+        return [], None
+    try:
+        return _geocode_nominatim(query), None
+    except Exception as exc:
+        return [], f"{type(exc).__name__}: {exc}"
 
 
 # ---------------------------------------------------------------------------
