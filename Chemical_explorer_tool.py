@@ -109,7 +109,8 @@ Once loaded, use the pages in the left sidebar to explore the data.
 
     if "_search_matches" in st.session_state:
         matches = st.session_state["_search_matches"]
-        options = [m["label"] for m in matches]
+        # Labels can repeat (e.g. two "Washington, Pennsylvania"), so append coordinates.
+        options = [f'{m["label"]}  ({m["lat"]:.3f}, {m["lon"]:.3f})' for m in matches]
         choice = st.selectbox("Multiple matches found — pick one:", options)
         if st.button("Use this location"):
             picked = matches[options.index(choice)]

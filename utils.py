@@ -38,6 +38,7 @@ WBD_BASE_URL = "https://storage.googleapis.com/open-ff-query-layer/v1/wbd"
 GHS_LOOKUP_URL = "https://storage.googleapis.com/open-ff-chem-profiles/ghs_lookup.parquet"
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+PHOTON_URL = "https://photon.komoot.io/api/"
 NOMINATIM_USER_AGENT = "watershed-chemical-explorer (FracTracker Alliance; contact: gary.allison@gmail.com)"
 # Pennsylvania bounding box: west, south, east, north
 PA_BBOX = (-80.519, 39.719, -74.689, 42.269)
@@ -205,23 +206,49 @@ def _geocode_nominatim(query: str) -> list:
     ]
 
 
+@st.cache_data(show_spinner=False)
+def _geocode_photon(query: str) -> list:
+    """Fallback geocoder (Photon, OSM-based) used when Nominatim fails, e.g. when
+    it rate-limits (HTTP 429) the shared IPs of Streamlit Community Cloud.
+    Raises on error so failures are not cached."""
+    west, south, east, north = PA_BBOX
+    params = {"q": query, "limit": 10, "bbox": f"{west},{south},{east},{north}"}
+    headers = {"User-Agent": NOMINATIM_USER_AGENT}
+    r = requests.get(PHOTON_URL, params=params, headers=headers, timeout=10)
+    r.raise_for_status()
+    out = []
+    for f in r.json().get("features", []):
+        p = f.get("properties", {})
+        if p.get("state") not in ("Pennsylvania", "PA"):   # bbox also covers edges of neighbouring states
+            continue
+        lon, lat = f["geometry"]["coordinates"][:2]
+        parts = [p.get("name") or p.get("street"), p.get("city"), p.get("county"), "Pennsylvania"]
+        label = ", ".join(dict.fromkeys(x for x in parts if x)) or query
+        out.append({"label": label, "lat": float(lat), "lon": float(lon)})
+    return out[:5]
+
+
 def geocode_pa_location(query: str):
     """
     Geocode a free-text place name or address to candidate Pennsylvania
-    locations (Nominatim / OpenStreetMap, restricted to a PA bounding box).
+    locations, restricted to a PA bounding box. Tries Nominatim first, then
+    Photon if Nominatim errors (both are OpenStreetMap-based).
 
     Returns (matches, error): matches is a list of {"label", "lat", "lon"}
     dicts, best match first (empty if nothing found); error is None on success
-    or a short message if the geocoding service could not be reached, so the
-    UI can distinguish "no match" from "service unavailable".
+    or a short message if no geocoding service could be reached, so the UI can
+    distinguish "no match" from "service unavailable".
     """
     query = query.strip()
     if not query:
         return [], None
     try:
         return _geocode_nominatim(query), None
-    except Exception as exc:
-        return [], f"{type(exc).__name__}: {exc}"
+    except Exception as exc1:
+        try:
+            return _geocode_photon(query), None
+        except Exception as exc2:
+            return [], f"Nominatim: {type(exc1).__name__}: {exc1}; Photon: {type(exc2).__name__}: {exc2}"
 
 
 # ---------------------------------------------------------------------------
